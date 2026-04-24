@@ -7,13 +7,17 @@
         <el-form-item label="规则名称" required>
           <el-input v-model="form.name" placeholder="如：官网前端" />
         </el-form-item>
-        <el-form-item label="代理类型" required>
-          <el-radio-group v-model="form.protocol">
-            <el-radio-button label="http">HTTP / HTTPS</el-radio-button>
+
+        <el-form-item label="代理模式" required>
+          <el-radio-group v-model="mode" @change="onModeChange">
+            <el-radio-button label="http">HTTP</el-radio-button>
+            <el-radio-button label="https">HTTPS</el-radio-button>
+            <el-radio-button label="http+https">HTTP + HTTPS</el-radio-button>
             <el-radio-button label="tcp">TCP</el-radio-button>
             <el-radio-button label="udp">UDP</el-radio-button>
           </el-radio-group>
         </el-form-item>
+
         <el-form-item label="监听协议栈">
           <el-radio-group v-model="form.listen_stack">
             <el-radio-button label="both">IPv4 + IPv6</el-radio-button>
@@ -22,51 +26,41 @@
           </el-radio-group>
         </el-form-item>
 
-        <!-- HTTP-specific -->
-        <template v-if="form.protocol==='http'">
+        <!-- HTTP / HTTP+HTTPS 共有：域名 -->
+        <template v-if="isHTTP">
           <el-form-item label="域名 server_name">
             <el-input v-model="form.server_name"
-              placeholder="如 www.example.com example.com，多个空格分隔，_ 表示任意" />
-            <div style="color:#999;font-size:12px;margin-top:4px">
-              不区分大小写；同一域名+端口在全局唯一
-            </div>
-          </el-form-item>
-          <el-form-item label="HTTP 端口" required>
-            <el-input-number v-model="form.listen_port" :min="1" :max="65535" />
-          </el-form-item>
-
-          <el-divider>HTTPS 配置</el-divider>
-          <el-form-item label="启用 HTTPS">
-            <el-switch v-model="form.https_enabled" :active-value="1" :inactive-value="0" />
-            <span style="margin-left:12px;color:#999;font-size:12px">
-              同一规则同时监听 HTTP 和 HTTPS
-            </span>
-          </el-form-item>
-          <template v-if="form.https_enabled===1">
-            <el-form-item label="HTTPS 端口" required>
-              <el-input-number v-model="form.https_port" :min="1" :max="65535" />
-            </el-form-item>
-            <el-form-item label="SSL 证书" required>
-              <el-select v-model="form.ssl_cert_id" placeholder="请选择证书" style="width:100%">
-                <el-option v-for="c in certs" :key="c.id"
-                  :label="c.domain + '  (到期: '+c.expire_at+')'" :value="c.id" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="HTTP→HTTPS 跳转">
-              <el-switch v-model="form.ssl_redirect" :active-value="1" :inactive-value="0" />
-              <span style="margin-left:12px;color:#999;font-size:12px">
-                开启后 HTTP 端口自动 301 跳转到 HTTPS 端口
-              </span>
-            </el-form-item>
-          </template>
-        </template>
-
-        <!-- TCP/UDP-specific -->
-        <template v-else>
-          <el-form-item label="监听端口" required>
-            <el-input-number v-model="form.listen_port" :min="1" :max="65535" />
+              placeholder="如 www.example.com，多个空格分隔，留空表示匹配所有" />
+            <div style="color:#999;font-size:12px;margin-top:4px">不区分大小写；留空匹配所有域名</div>
           </el-form-item>
         </template>
+
+        <!-- HTTP 端口 -->
+        <el-form-item v-if="mode==='http' || mode==='http+https'" label="HTTP 端口" required>
+          <el-input-number v-model="form.listen_port" :min="1" :max="65535" />
+        </el-form-item>
+
+        <!-- HTTPS 相关 -->
+        <template v-if="mode==='https' || mode==='http+https'">
+          <el-form-item label="HTTPS 端口" required>
+            <el-input-number v-model="form.https_port" :min="1" :max="65535" />
+          </el-form-item>
+          <el-form-item label="SSL 证书" required>
+            <el-select v-model="form.ssl_cert_id" placeholder="请选择证书" style="width:100%">
+              <el-option v-for="c in certs" :key="c.id"
+                :label="c.domain + '  (到期: '+c.expire_at+')'" :value="c.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="mode==='http+https'" label="HTTP→HTTPS 跳转">
+            <el-switch v-model="form.ssl_redirect" :active-value="1" :inactive-value="0" />
+            <span style="margin-left:12px;color:#999;font-size:12px">开启后 HTTP 端口自动 301 跳转到 HTTPS</span>
+          </el-form-item>
+        </template>
+
+        <!-- TCP/UDP 端口 -->
+        <el-form-item v-if="mode==='tcp' || mode==='udp'" label="监听端口" required>
+          <el-input-number v-model="form.listen_port" :min="1" :max="65535" />
+        </el-form-item>
 
         <el-divider>负载均衡</el-divider>
         <el-form-item label="算法">
@@ -84,8 +78,8 @@
         <template v-if="form.hc_enabled===1">
           <el-form-item label="间隔(秒)"><el-input-number v-model="form.hc_interval" :min="3" :max="600" /></el-form-item>
           <el-form-item label="超时(秒)"><el-input-number v-model="form.hc_timeout" :min="1" :max="60" /></el-form-item>
-          <el-form-item v-if="form.protocol==='http'" label="检查路径">
-            <el-input v-model="form.hc_path" placeholder="/health" />
+          <el-form-item v-if="isHTTP" label="检查路径">
+            <el-input v-model="form.hc_path" placeholder="/" />
           </el-form-item>
           <el-form-item label="连续失败下线"><el-input-number v-model="form.hc_fall" :min="1" :max="10" /></el-form-item>
           <el-form-item label="连续成功恢复"><el-input-number v-model="form.hc_rise" :min="1" :max="10" /></el-form-item>
@@ -151,10 +145,23 @@ const isEdit = computed(() => !!route.params.id)
 const saving = ref(false)
 const certs = ref([])
 
+// mode: http | https | http+https | tcp | udp
+const mode = ref('http')
+const isHTTP = computed(() => ['http', 'https', 'http+https'].includes(mode.value))
+
+function onModeChange(v) {
+  // 切换模式时设置合理的默认端口
+  if (v === 'http')       { form.value.listen_port = 80;  form.value.https_enabled = 0 }
+  if (v === 'https')      { form.value.listen_port = 0;   form.value.https_enabled = 1; form.value.https_port = 443 }
+  if (v === 'http+https') { form.value.listen_port = 80;  form.value.https_enabled = 1; form.value.https_port = 443 }
+  if (v === 'tcp')        { form.value.listen_port = 8080; form.value.https_enabled = 0 }
+  if (v === 'udp')        { form.value.listen_port = 8080; form.value.https_enabled = 0 }
+}
+
 const form = ref({
   name: '', protocol: 'http', listen_port: 80, listen_stack: 'both',
   https_enabled: 0, https_port: 443, ssl_cert_id: null, ssl_redirect: 0,
-  server_name: '_',
+  server_name: '',
   lb_method: 'round_robin',
   hc_enabled: 1, hc_interval: 10, hc_timeout: 3, hc_path: '/',
   hc_rise: 2, hc_fall: 3, log_max_size: '5M', custom_config: '',
@@ -165,28 +172,42 @@ function addServer() {
   form.value.servers.push({ address: '', port: 80, weight: 1, state: 'up' })
 }
 
+// mode → form.protocol + form.https_enabled
+function modeToForm() {
+  if (mode.value === 'tcp')        form.value.protocol = 'tcp'
+  else if (mode.value === 'udp')   form.value.protocol = 'udp'
+  else                             form.value.protocol = 'http'
+
+  form.value.https_enabled = (mode.value === 'https' || mode.value === 'http+https') ? 1 : 0
+  if (mode.value === 'https') form.value.listen_port = 0
+  if (mode.value !== 'http+https') form.value.ssl_redirect = 0
+}
+
+// form.protocol + form.https_enabled → mode
+function formToMode(protocol, httpsEnabled, listenPort) {
+  if (protocol === 'tcp') return 'tcp'
+  if (protocol === 'udp') return 'udp'
+  if (httpsEnabled === 1) return listenPort > 0 ? 'http+https' : 'https'
+  return 'http'
+}
+
 async function submit() {
   if (!form.value.name) return ElMessage.warning('请输入规则名称')
   if (form.value.servers.length === 0) return ElMessage.warning('至少一个后端节点')
   if (form.value.servers.some(s => !s.address)) return ElMessage.warning('节点地址不能为空')
-  if (form.value.protocol === 'http' && form.value.https_enabled === 1) {
-    if (!form.value.https_port) return ElMessage.warning('请输入 HTTPS 端口')
-    if (!form.value.ssl_cert_id) return ElMessage.warning('HTTPS 已启用，请选择 SSL 证书')
-  }
 
+  modeToForm()
   const payload = { ...form.value }
+
+  // 域名为空时传 _ 表示匹配所有
+  if (!payload.server_name || !payload.server_name.trim()) payload.server_name = '_'
+
   if (payload.protocol !== 'http') {
-    // TCP/UDP: clear HTTP-only fields
-    payload.https_enabled = 0
-    payload.https_port = null
-    payload.ssl_cert_id = null
-    payload.ssl_redirect = 0
-    payload.server_name = ''
+    payload.https_enabled = 0; payload.https_port = null
+    payload.ssl_cert_id = null; payload.ssl_redirect = 0; payload.server_name = ''
   }
   if (payload.https_enabled !== 1) {
-    payload.https_port = null
-    payload.ssl_cert_id = null
-    payload.ssl_redirect = 0
+    payload.https_port = null; payload.ssl_cert_id = null; payload.ssl_redirect = 0
   }
 
   saving.value = true
@@ -207,8 +228,7 @@ onMounted(async () => {
   if (isEdit.value) {
     const data = (await api.get(`/rules/${route.params.id}`)).data
     Object.assign(form.value, data)
-    if (data.ssl_cert_id) form.value.ssl_cert_id = data.ssl_cert_id
-    if (data.https_port) form.value.https_port = data.https_port
+    mode.value = formToMode(data.protocol, data.https_enabled, data.listen_port)
   }
 })
 </script>

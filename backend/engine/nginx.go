@@ -159,27 +159,28 @@ func renderHTTP(r *model.Rule, servers []model.Server) string {
 	}
 	sb.WriteString("    keepalive 32;\n}\n\n")
 
-	// HTTP server block
-	sb.WriteString("server {\n")
-	sb.WriteString(renderListen(r.ListenStack, r.ListenPort, ""))
-	sb.WriteString(fmt.Sprintf("    server_name %s;\n", sn))
-	sb.WriteString(fmt.Sprintf("    access_log %s/rule_%d_access.log combined;\n", config.Global.Nginx.LogDir, r.ID))
-	sb.WriteString(fmt.Sprintf("    error_log  %s/rule_%d_error.log warn;\n", config.Global.Nginx.LogDir, r.ID))
+	// HTTP server block（listen_port=0 表示纯 HTTPS 模式，跳过 HTTP 块）
+	if r.ListenPort > 0 {
+		sb.WriteString("server {\n")
+		sb.WriteString(renderListen(r.ListenStack, r.ListenPort, ""))
+		sb.WriteString(fmt.Sprintf("    server_name %s;\n", sn))
+		sb.WriteString(fmt.Sprintf("    access_log %s/rule_%d_access.log combined;\n", config.Global.Nginx.LogDir, r.ID))
+		sb.WriteString(fmt.Sprintf("    error_log  %s/rule_%d_error.log warn;\n", config.Global.Nginx.LogDir, r.ID))
 
-	if r.HTTPSEnabled == 1 && r.SSLRedirect == 1 && r.HTTPSPort != nil {
-		// redirect HTTP → HTTPS
-		if *r.HTTPSPort == 443 {
-			sb.WriteString("    return 301 https://$host$request_uri;\n")
+		if r.HTTPSEnabled == 1 && r.SSLRedirect == 1 && r.HTTPSPort != nil {
+			if *r.HTTPSPort == 443 {
+				sb.WriteString("    return 301 https://$host$request_uri;\n")
+			} else {
+				sb.WriteString(fmt.Sprintf("    return 301 https://$host:%d$request_uri;\n", *r.HTTPSPort))
+			}
 		} else {
-			sb.WriteString(fmt.Sprintf("    return 301 https://$host:%d$request_uri;\n", *r.HTTPSPort))
+			sb.WriteString(proxyBlock(r.ID))
+			if r.CustomConfig != "" {
+				sb.WriteString("    " + r.CustomConfig + "\n")
+			}
 		}
-	} else {
-		sb.WriteString(proxyBlock(r.ID))
-		if r.CustomConfig != "" {
-			sb.WriteString("    " + r.CustomConfig + "\n")
-		}
+		sb.WriteString("}\n")
 	}
-	sb.WriteString("}\n")
 
 	// HTTPS server block（仅在启用时生成）
 	if r.HTTPSEnabled == 1 && r.HTTPSPort != nil && r.Domain != "" {

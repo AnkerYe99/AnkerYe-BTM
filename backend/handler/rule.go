@@ -17,7 +17,7 @@ import (
 type ruleReq struct {
 	Name         string       `json:"name" binding:"required"`
 	Protocol     string       `json:"protocol" binding:"required"` // http / tcp / udp
-	ListenPort   int          `json:"listen_port" binding:"required"` // HTTP port for http; proxy port for tcp/udp
+	ListenPort   int          `json:"listen_port"` // HTTP port for http; proxy port for tcp/udp; 0 = HTTPS-only
 	ListenStack  string       `json:"listen_stack"`
 	HTTPSEnabled int          `json:"https_enabled"`
 	HTTPSPort    *int         `json:"https_port"`
@@ -289,22 +289,29 @@ func validateRule(r *ruleReq) error {
 	if !valid[r.Protocol] {
 		return errMsg("protocol 必须是 http/tcp/udp")
 	}
-	if r.ListenPort <= 0 || r.ListenPort > 65535 {
-		return errMsg("端口号无效")
-	}
 	validStack := map[string]bool{"": true, "v4": true, "v6": true, "both": true}
 	if !validStack[r.ListenStack] {
 		return errMsg("listen_stack 必须是 v4/v6/both")
 	}
-	if r.Protocol == "http" && r.HTTPSEnabled == 1 {
-		if r.HTTPSPort == nil || *r.HTTPSPort <= 0 || *r.HTTPSPort > 65535 {
-			return errMsg("HTTPS 端口号无效")
+	if r.Protocol == "http" {
+		httpsOnly := r.HTTPSEnabled == 1 && r.ListenPort == 0
+		if !httpsOnly && (r.ListenPort <= 0 || r.ListenPort > 65535) {
+			return errMsg("HTTP 端口号无效")
 		}
-		if r.ListenPort == *r.HTTPSPort {
-			return errMsg("HTTP 端口与 HTTPS 端口不能相同")
+		if r.HTTPSEnabled == 1 {
+			if r.HTTPSPort == nil || *r.HTTPSPort <= 0 || *r.HTTPSPort > 65535 {
+				return errMsg("HTTPS 端口号无效")
+			}
+			if r.ListenPort > 0 && r.ListenPort == *r.HTTPSPort {
+				return errMsg("HTTP 端口与 HTTPS 端口不能相同")
+			}
+			if r.SSLCertID == nil {
+				return errMsg("启用 HTTPS 时必须选择 SSL 证书")
+			}
 		}
-		if r.SSLCertID == nil {
-			return errMsg("启用 HTTPS 时必须选择 SSL 证书")
+	} else {
+		if r.ListenPort <= 0 || r.ListenPort > 65535 {
+			return errMsg("端口号无效")
 		}
 	}
 	if len(r.Servers) == 0 {
