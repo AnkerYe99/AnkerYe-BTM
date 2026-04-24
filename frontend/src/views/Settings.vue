@@ -30,15 +30,19 @@
           </el-input>
         </el-form-item>
 
-        <el-divider>腾讯云 SSL 续签</el-divider>
-        <el-form-item label="API SecretId">
-          <el-input v-model="form.tencent_secret_id" />
+        <el-divider>SSL 自动续签（Let's Encrypt + DNSPod）</el-divider>
+        <el-alert type="info" :closable="false" style="margin-bottom:16px;max-width:640px">
+          使用 <b>Let's Encrypt</b> 免费证书，通过腾讯云 DNSPod API 自动完成 DNS-01 验证。<br>
+          要求：域名的 DNS 解析托管在 DNSPod（与 API Key 同账号）。
+        </el-alert>
+        <el-form-item label="ACME 邮箱" required>
+          <el-input v-model="form.acme_email" placeholder="your@email.com（用于 Let's Encrypt 账号注册）" />
+        </el-form-item>
+        <el-form-item label="API SecretId" required>
+          <el-input v-model="form.tencent_secret_id" placeholder="腾讯云 DNSPod API SecretId" />
         </el-form-item>
         <el-form-item label="API SecretKey">
           <el-input v-model="form.tencent_secret_key" type="password" show-password placeholder="未修改保持为空" />
-        </el-form-item>
-        <el-form-item label="DNS 解析区域">
-          <el-input v-model="form.tencent_dns_region" placeholder="ap-guangzhou" />
         </el-form-item>
 
         <el-divider>邮件通知 (SMTP)</el-divider>
