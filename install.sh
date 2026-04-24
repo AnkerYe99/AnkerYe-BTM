@@ -171,6 +171,7 @@ ok "后端编译完成（单一可执行文件）"
 # ─── 部署文件 ────────────────────────────────────────────
 step "部署到 $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/data"
+mkdir -p /var/log/nginxflow
 cp /tmp/nginxflow-server-new "$INSTALL_DIR/nginxflow-server"
 chmod +x "$INSTALL_DIR/nginxflow-server"
 rm -f /tmp/nginxflow-server-new

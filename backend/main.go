@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -28,6 +29,9 @@ func main() {
 
 	if err := config.Load(*cfgPath); err != nil {
 		log.Fatalf("load config: %v", err)
+	}
+	if err := os.MkdirAll(config.Global.Nginx.LogDir, 0755); err != nil {
+		log.Fatalf("create log dir: %v", err)
 	}
 	if err := db.Init(config.Global.Database.Path); err != nil {
 		log.Fatalf("db init: %v", err)
