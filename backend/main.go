@@ -104,6 +104,7 @@ func main() {
 		auth.POST("/settings/nginx_reload", handler.ReloadNginx)
 		auth.GET("/settings/backup", handler.Backup)
 		auth.POST("/settings/restore", handler.Restore)
+		auth.POST("/settings/test_email", handler.TestEmail)
 
 		auth.GET("/sync/nodes", handler.ListSyncNodes)
 		auth.POST("/sync/nodes", handler.AddSyncNode)

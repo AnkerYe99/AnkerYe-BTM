@@ -18,7 +18,7 @@ func GetSettings(c *gin.Context) {
 		var k, v string
 		rows.Scan(&k, &v)
 		// 敏感字段仅返回是否已配置
-		if k == "tencent_secret_key" || k == "sync_token" {
+		if k == "tencent_secret_key" || k == "sync_token" || k == "smtp_password" {
 			if v != "" {
 				m[k] = "***"
 			} else {
@@ -128,6 +128,15 @@ func Backup(c *gin.Context) {
 	b, _ := json.MarshalIndent(data, "", "  ")
 	c.Header("Content-Disposition", "attachment; filename=nginxflow-backup.json")
 	c.Data(200, "application/json", b)
+}
+
+func TestEmail(c *gin.Context) {
+	err := engine.SendNotify("", "NginxFlow 测试邮件", "这是一封来自 NginxFlow 的测试邮件，说明您的 SMTP 配置正确！")
+	if err != nil {
+		util.Fail(c, 500, err.Error())
+		return
+	}
+	util.OK(c, nil)
 }
 
 func Restore(c *gin.Context) {
