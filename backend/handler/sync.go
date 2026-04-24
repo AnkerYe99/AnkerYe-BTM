@@ -39,6 +39,25 @@ func SyncExport(c *gin.Context) {
 		rows.Close()
 	}
 
+	// 导出通知/SMTP 等系统设置（排除敏感和主节点专属字段）
+	settings := map[string]string{}
+	skipKeys := map[string]bool{
+		"tencent_secret_id": true, "tencent_secret_key": true,
+		"sync_token": true, "slave_master_url": true, "slave_sync_token": true,
+		"slave_interval": true, "slave_last_sync_at": true, "slave_last_status": true, "slave_last_msg": true,
+	}
+	rows2, _ := db.DB.Query(`SELECT k,v FROM system_settings`)
+	if rows2 != nil {
+		for rows2.Next() {
+			var k, v string
+			rows2.Scan(&k, &v)
+			if !skipKeys[k] {
+				settings[k] = v
+			}
+		}
+		rows2.Close()
+	}
+
 	// 客户端上报自己的地址（可选）
 	fromAddr := c.ClientIP()
 
@@ -54,6 +73,7 @@ func SyncExport(c *gin.Context) {
 		"generated_at":  time.Now().Format(time.RFC3339),
 		"nginx_configs": configs,
 		"certs":         certs,
+		"settings":      settings,
 	})
 }
 

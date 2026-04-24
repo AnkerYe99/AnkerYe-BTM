@@ -47,6 +47,7 @@ func main() {
 	health.StartAll()
 	log.Println("[health] workers started")
 	go startCertAutoRenew()
+	go engine.StartSlaveSyncAgent()
 
 	r := gin.Default()
 	r.Use(corsMiddleware())

@@ -86,8 +86,27 @@
         </el-form-item>
 
         <el-divider>主从同步</el-divider>
+        <el-alert type="info" :closable="false" style="margin-bottom:16px;max-width:620px">
+          <b>主节点</b>：设置「同步鉴权 Token」，在「从节点」页面查看同步状态。<br>
+          <b>从节点</b>：填写主节点地址和 Token，本机将定时拉取主节点的规则、证书、通知配置并自动应用。从节点不执行 SSL 续签。
+        </el-alert>
         <el-form-item label="同步鉴权 Token">
-          <el-input v-model="form.sync_token" type="password" show-password placeholder="从节点鉴权 token" />
+          <el-input v-model="form.sync_token" type="password" show-password placeholder="主节点：设置此 token 供从节点鉴权" style="max-width:360px" />
+        </el-form-item>
+        <el-form-item label="主节点地址">
+          <el-input v-model="form.slave_master_url" placeholder="http://10.x.x.x:9000（留空=本机是主节点）" />
+          <div style="color:#999;font-size:12px;margin-top:4px">填写后本机进入从节点模式，自动定时同步</div>
+        </el-form-item>
+        <el-form-item label="主节点 Token">
+          <el-input v-model="form.slave_sync_token" type="password" show-password placeholder="主节点的同步鉴权 Token" />
+        </el-form-item>
+        <el-form-item label="同步间隔（秒）">
+          <el-input-number v-model.number="form.slave_interval" :min="10" :max="3600" placeholder="60" />
+          <span style="margin-left:12px;color:#999;font-size:12px">从节点每隔此秒数检测主节点是否有更新</span>
+        </el-form-item>
+        <el-form-item v-if="slaveStatus" label="从节点状态">
+          <el-tag :type="form.slave_last_status==='ok'?'success':'danger'" size="small">{{ form.slave_last_status==='ok'?'正常':'异常' }}</el-tag>
+          <span style="margin-left:8px;color:#999;font-size:12px">{{ form.slave_last_sync_at }} — {{ form.slave_last_msg }}</span>
         </el-form-item>
 
         <el-form-item>
@@ -111,6 +130,8 @@ import api from '../api'
 const form = ref({})
 const testingEmail = ref(false)
 
+const slaveStatus = computed(() => !!form.value.slave_last_sync_at)
+
 const smtpTLS = computed({
   get: () => form.value.smtp_tls !== '0',
   set: (v) => { form.value.smtp_tls = v ? '1' : '0' }
@@ -119,6 +140,7 @@ const smtpTLS = computed({
 async function load() {
   form.value = (await api.get('/settings')).data
   if (form.value.smtp_port) form.value.smtp_port = Number(form.value.smtp_port)
+  if (form.value.slave_interval) form.value.slave_interval = Number(form.value.slave_interval)
 }
 
 async function save() {
