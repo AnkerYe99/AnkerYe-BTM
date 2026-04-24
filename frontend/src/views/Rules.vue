@@ -20,7 +20,7 @@
           <el-table-column label="端口" width="180">
             <template #default="{row}">
               <span v-if="row.protocol==='http'">
-                <el-tag size="small" type="info">HTTP:{{ row.listen_port }}</el-tag>
+                <el-tag v-if="row.listen_port>0" size="small" type="info">HTTP:{{ row.listen_port }}</el-tag>
                 <el-tag v-if="row.https_enabled===1" size="small" type="success" style="margin-left:4px">
                   HTTPS:{{ row.https_port }}
                 </el-tag>
