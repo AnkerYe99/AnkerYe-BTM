@@ -1,0 +1,18 @@
+# Backend
+backend/nginxflow-server
+backend/data/
+backend/config.yaml
+backend/*.db
+backend/*.db-shm
+backend/*.db-wal
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Deploy artifacts
+deploy/*.tar.gz
+
+# OS
+.DS_Store
+*.swp
