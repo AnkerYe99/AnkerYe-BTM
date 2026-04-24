@@ -24,21 +24,17 @@ DEFAULT_PORT="9000"
 # ─── 权限检查 ─────────────────────────────────────────────
 [ "$(id -u)" -eq 0 ] || err "请使用 root 或 sudo 运行本脚本"
 
+# ─── 端口配置（支持环境变量覆盖，默认 9000）─────────────────
+APP_PORT=${APP_PORT:-$DEFAULT_PORT}
+JWT_SECRET=$(tr -dc 'A-Za-z0-9!@#%^&*' </dev/urandom | head -c 48 2>/dev/null)
+
 # ─── 欢迎语 ──────────────────────────────────────────────
 echo -e "${BOLD}"
 echo "╔═══════════════════════════════════════╗"
 echo "║        NginxFlow  安装程序            ║"
 echo "╚═══════════════════════════════════════╝"
 echo -e "${NC}"
-
-# ─── 交互配置（从终端读取，避免管道模式下读到脚本内容）────────
-read -rp "管理后台端口 [默认 $DEFAULT_PORT]: " INPUT_PORT </dev/tty
-APP_PORT=${INPUT_PORT:-$DEFAULT_PORT}
-
-JWT_SECRET=$(tr -dc 'A-Za-z0-9!@#%^&*' </dev/urandom | head -c 48 2>/dev/null)
-
-echo ""
-info "管理后台端口: ${BOLD}$APP_PORT${NC}（前端 + API 统一端口）"
+info "管理后台端口: ${BOLD}$APP_PORT${NC}  （自定义端口: APP_PORT=8080 bash install.sh）"
 echo ""
 
 # ─── 检测包管理器 ─────────────────────────────────────────
