@@ -164,14 +164,16 @@ info "前端已复制到 backend/frontend/dist，准备 embed"
 step "编译后端（含嵌入前端）"
 cd "$TMP_DIR/backend"
 info "go build..."
-CGO_ENABLED=1 GOFLAGS="-mod=mod" go build -ldflags="-s -w" -o nginxflow-server .
+export PATH=$PATH:/usr/local/go/bin:/usr/bin
+CGO_ENABLED=1 GOFLAGS="-mod=mod" go build -ldflags="-s -w" -o /tmp/nginxflow-server-new .
 ok "后端编译完成（单一可执行文件）"
 
 # ─── 部署文件 ────────────────────────────────────────────
 step "部署到 $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/data"
-cp "$TMP_DIR/backend/nginxflow-server" "$INSTALL_DIR/"
+cp /tmp/nginxflow-server-new "$INSTALL_DIR/nginxflow-server"
 chmod +x "$INSTALL_DIR/nginxflow-server"
+rm -f /tmp/nginxflow-server-new
 ok "部署完成（仅一个可执行文件）"
 
 # ─── 生成配置文件（仅首次）──────────────────────────────────
