@@ -104,23 +104,22 @@ func main() {
 
 	// 前端静态文件（SPA 模式，未匹配路由回退 index.html）
 	distFS, _ := fs.Sub(frontendFS, "frontend/dist")
+	fileServer := http.FileServer(http.FS(distFS))
 	r.NoRoute(func(c *gin.Context) {
 		urlPath := strings.TrimPrefix(c.Request.URL.Path, "/")
+		// 根路径或文件不存在 → 直接输出 index.html 内容（避免重定向死循环）
 		if urlPath == "" {
-			urlPath = "index.html"
+			data, _ := fs.ReadFile(distFS, "index.html")
+			c.Data(http.StatusOK, "text/html; charset=utf-8", data)
+			return
 		}
-		f, err := distFS.Open(urlPath)
+		_, err := fs.Stat(distFS, urlPath)
 		if err != nil {
-			c.FileFromFS("index.html", http.FS(distFS))
+			data, _ := fs.ReadFile(distFS, "index.html")
+			c.Data(http.StatusOK, "text/html; charset=utf-8", data)
 			return
 		}
-		stat, err := f.Stat()
-		f.Close()
-		if err != nil || stat.IsDir() {
-			c.FileFromFS("index.html", http.FS(distFS))
-			return
-		}
-		c.FileFromFS(urlPath, http.FS(distFS))
+		fileServer.ServeHTTP(c.Writer, c.Request)
 	})
 
 	addr := fmt.Sprintf(":%d", config.Global.Server.Port)
