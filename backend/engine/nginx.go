@@ -11,7 +11,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
 
 	"nginxflow/config"
 	"nginxflow/db"
@@ -379,8 +381,8 @@ func ApplyRule(ruleID int64) error {
 		return fmt.Errorf("nginx 语法错误: %s", string(out))
 	}
 	// reload
-	if out, err := exec.Command("nginx", "-s", "reload").CombinedOutput(); err != nil {
-		return fmt.Errorf("nginx reload 失败: %s", string(out))
+	if err := smartReload(); err != nil {
+		return err
 	}
 
 	WriteLogrotate(r)
@@ -405,8 +407,7 @@ func DeleteRule(ruleID int64) error {
 		os.Remove(l)
 	}
 	SyncPortDefaults()
-	_, err := exec.Command("nginx", "-s", "reload").CombinedOutput()
-	return err
+	return smartReload()
 }
 
 func removeRuleFiles(ruleID int64, protocol string) error {
@@ -442,17 +443,54 @@ func TestConfig() (string, error) {
 	return string(out), err
 }
 
-// reload 全部
-func Reload() error {
-	out, err := exec.Command("nginx", "-s", "reload").CombinedOutput()
+// nginxRunning 检查 nginx 主进程是否存活
+func nginxRunning() bool {
+	data, err := os.ReadFile("/run/nginx.pid")
 	if err != nil {
-		return fmt.Errorf("reload 失败: %s", string(out))
+		return false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 {
+		return false
+	}
+	return syscall.Kill(pid, 0) == nil
+}
+
+// smartReload 若 nginx 在跑则 reload，否则 start
+func smartReload() error {
+	var out []byte
+	var err error
+	if nginxRunning() {
+		out, err = exec.Command("nginx", "-s", "reload").CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("nginx reload 失败: %s", string(out))
+		}
+	} else {
+		out, err = exec.Command("nginx").CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("nginx 启动失败: %s", string(out))
+		}
 	}
 	return nil
 }
 
+// reload 全部
+func Reload() error {
+	return smartReload()
+}
+
 // 应用所有启用的规则
 func ApplyAll() error {
+	// 清理 nginx 包安装时可能残留的默认 catch-all 配置，避免与 SyncPortDefaults 生成的冲突
+	for _, f := range []string{
+		"/etc/nginx/conf.d/default.conf",
+		"/etc/nginx/sites-enabled/default",
+	} {
+		if _, err := os.Stat(f); err == nil {
+			os.Remove(f)
+		}
+	}
+
 	rows, err := db.DB.Query(`SELECT id FROM rules WHERE status=1 ORDER BY id`)
 	if err != nil {
 		return err
