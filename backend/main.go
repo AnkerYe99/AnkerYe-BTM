@@ -49,6 +49,8 @@ func main() {
 	engine.StartStatsWorker()
 	go startCertAutoRenew()
 	go engine.StartSlaveSyncAgent()
+	go engine.StartSlaveRulesSyncAgent()
+	go engine.StartSlaveCertsSyncAgent()
 
 	r := gin.Default()
 	r.Use(corsMiddleware())
@@ -59,6 +61,8 @@ func main() {
 	// 无需 JWT
 	r.POST("/api/v1/auth/login", handler.Login)
 	r.GET("/api/v1/sync/export", handler.SyncExport)
+	r.GET("/api/v1/sync/rules_export", handler.SyncRulesExport)
+	r.GET("/api/v1/sync/certs_export", handler.SyncCertsExport)
 	r.GET("/api/v1/test", func(c *gin.Context) {
 		c.JSON(200, gin.H{"code": 0, "msg": "ok", "service": "nginxflow"})
 	})
@@ -87,6 +91,7 @@ func main() {
 		auth.POST("/rules/:id/servers/:sid/enable", handler.EnableServer)
 		auth.POST("/rules/:id/servers/:sid/disable", handler.DisableServer)
 		auth.GET("/rules/:id/servers/:sid/logs", handler.ServerLogs)
+		auth.GET("/rules/:id/logs/download", handler.DownloadRuleLog)
 
 		auth.GET("/certs", handler.ListCerts)
 		auth.POST("/certs", handler.UploadCert)
@@ -102,6 +107,8 @@ func main() {
 		auth.GET("/stats/system", handler.System)
 		auth.GET("/stats/traffic", handler.RuleTraffic)
 		auth.GET("/stats/server_health", handler.ServerHealth)
+		auth.GET("/stats/errors", handler.ListErrorLogs)
+		auth.GET("/rules/simple", handler.ListRulesSimple)
 
 		auth.GET("/settings", handler.GetSettings)
 		auth.PUT("/settings", handler.UpdateSettings)
@@ -114,6 +121,8 @@ func main() {
 		auth.GET("/sync/nodes", handler.ListSyncNodes)
 		auth.POST("/sync/nodes", handler.AddSyncNode)
 		auth.DELETE("/sync/nodes/:id", handler.DeleteSyncNode)
+		auth.POST("/sync/trigger_rules", handler.TriggerRulesSync)
+		auth.POST("/sync/trigger_certs", handler.TriggerCertsSync)
 	}
 
 	// 前端静态文件（SPA 模式，未匹配路由回退 index.html）

@@ -16,7 +16,30 @@ import (
 
 	"nginxflow/config"
 	"nginxflow/middleware"
+	"nginxflow/util"
 )
+
+// DownloadRuleLog 下载规则日志文件
+func DownloadRuleLog(c *gin.Context) {
+	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	logType := c.DefaultQuery("type", "access")
+	var logPath string
+	if logType == "stream" {
+		logPath = filepath.Join(config.Global.Nginx.LogDir, fmt.Sprintf("rule_%d_stream.log", id))
+	} else {
+		logPath = filepath.Join(config.Global.Nginx.LogDir, fmt.Sprintf("rule_%d_access.log", id))
+	}
+	info, err := os.Stat(logPath)
+	if err != nil {
+		util.Fail(c, 404, "日志文件不存在")
+		return
+	}
+	filename := filepath.Base(logPath)
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	c.Header("Content-Type", "text/plain; charset=utf-8")
+	c.Header("Content-Length", fmt.Sprintf("%d", info.Size()))
+	c.File(logPath)
+}
 
 // StreamRuleLogs streams the access log of a rule via SSE.
 // Auth is via ?token= query param because EventSource doesn't support headers.

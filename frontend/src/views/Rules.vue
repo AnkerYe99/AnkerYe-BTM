@@ -9,7 +9,7 @@
     </div>
     <el-card>
       <div style="overflow-x:auto">
-        <el-table :data="filteredList" size="small" v-loading="loading">
+        <el-table :data="pagedList" size="small" v-loading="loading">
           <el-table-column prop="id" label="ID" width="60" />
           <el-table-column prop="name" label="名称" min-width="120" />
           <el-table-column label="类型" width="70">
@@ -73,6 +73,7 @@
             </template>
           </el-table-column>
         </el-table>
+        <Pagination :total="filteredList.length" :page-size="PAGE_SIZE" v-model:current="page" />
       </div>
     </el-card>
 
@@ -88,6 +89,7 @@
           style="margin-left:12px" />
         <el-button size="small" style="margin-left:12px" @click="logLines=[]">清空</el-button>
         <el-button size="small" style="margin-left:8px" @click="scrollBottom">↓ 最新</el-button>
+        <el-button size="small" type="primary" plain style="margin-left:8px" @click="downloadLog">下载日志</el-button>
       </div>
       <div ref="logBox" class="log-box">
         <div v-for="(l,i) in logLines" :key="i" class="log-line">{{ l }}</div>
@@ -97,13 +99,16 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import Pagination from '../components/Pagination.vue'
 
+const PAGE_SIZE = 30
 const list = ref([])
 const loading = ref(false)
 const search = ref('')
+const page = ref(1)
 const previewShow = ref(false)
 const previewText = ref('')
 
@@ -123,6 +128,13 @@ const filteredList = computed(() => {
     (r.server_name || '').toLowerCase().includes(q) ||
     (r.addresses || '').toLowerCase().includes(q)
   )
+})
+
+watch(search, () => { page.value = 1 })
+
+const pagedList = computed(() => {
+  const start = (page.value - 1) * PAGE_SIZE
+  return filteredList.value.slice(start, start + PAGE_SIZE)
 })
 
 function handleCmd(cmd, row) {
@@ -149,6 +161,22 @@ function openLog(row) {
 }
 function closeLog() {
   if (logEs) { logEs.close(); logEs = null }
+}
+async function downloadLog() {
+  if (!logRule.value) return
+  const logType = logRule.value.protocol === 'http' || logRule.value.protocol === 'https' ? 'access' : 'stream'
+  const token = localStorage.getItem('token')
+  const res = await fetch(`/api/v1/rules/${logRule.value.id}/logs/download?type=${logType}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  if (!res.ok) { ElMessage.error('日志文件不存在'); return }
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `rule_${logRule.value.id}_${logType}.log`
+  a.click()
+  URL.revokeObjectURL(url)
 }
 function scrollBottom() {
   if (logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight

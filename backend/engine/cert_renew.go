@@ -242,6 +242,13 @@ func parseCertExpiry(certPEM string) string {
 }
 
 func AutoRenewCheck() {
+	// 全局禁用续签（从节点模式：证书由主节点续签后同步过来）
+	var disabled string
+	db.DB.QueryRow(`SELECT v FROM system_settings WHERE k='cert_renew_disabled'`).Scan(&disabled)
+	if disabled == "1" {
+		log.Println("[auto-renew] 已禁用本机自动续签（从节点模式）")
+		return
+	}
 	rows, _ := db.DB.Query(`SELECT id, domain, expire_at, renew_status FROM ssl_certs WHERE auto_renew=1`)
 	defer rows.Close()
 	for rows.Next() {

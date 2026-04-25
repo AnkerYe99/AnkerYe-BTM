@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -104,30 +105,36 @@ func checkOnce(ruleID int64) {
 		now := time.Now().Format("2006-01-02 15:04:05")
 
 		if res.OK {
-			// 成功
 			newSuccess := s.SuccessCount + 1
 			newFail := 0
 			if s.State == "down" && newSuccess >= r.HCRise {
 				s.State = "up"
 				stateChanged = true
-				db.DB.Exec(`INSERT INTO health_check_logs(server_id,rule_id,state,latency_ms,message) VALUES(?,?,?,?,?)`,
+				db.AsyncExec(`INSERT INTO health_check_logs(server_id,rule_id,state,latency_ms,message) VALUES(?,?,?,?,?)`,
 					s.ID, r.ID, "up", res.Latency, "recovered")
 				log.Printf("[health] rule=%d server=%s:%d RECOVERED", r.ID, s.Address, s.Port)
+				go engine.SendNotify("notify_server_up",
+					fmt.Sprintf("节点恢复 — %s:%d", s.Address, s.Port),
+					fmt.Sprintf("规则：%s\n节点：%s:%d\n延迟：%dms\n时间：%s",
+						r.Name, s.Address, s.Port, res.Latency, now))
 			}
-			db.DB.Exec(`UPDATE upstream_servers SET state=?,fail_count=?,success_count=?,last_check_at=?,last_err='' WHERE id=?`,
+			db.AsyncExec(`UPDATE upstream_servers SET state=?,fail_count=?,success_count=?,last_check_at=?,last_err='' WHERE id=?`,
 				s.State, newFail, newSuccess, now, s.ID)
 		} else {
-			// 失败
 			newFail := s.FailCount + 1
 			newSuccess := 0
 			if s.State == "up" && newFail >= r.HCFall {
 				s.State = "down"
 				stateChanged = true
-				db.DB.Exec(`INSERT INTO health_check_logs(server_id,rule_id,state,latency_ms,message) VALUES(?,?,?,?,?)`,
+				db.AsyncExec(`INSERT INTO health_check_logs(server_id,rule_id,state,latency_ms,message) VALUES(?,?,?,?,?)`,
 					s.ID, r.ID, "down", res.Latency, res.Err)
 				log.Printf("[health] rule=%d server=%s:%d DOWN: %s", r.ID, s.Address, s.Port, res.Err)
+				go engine.SendNotify("notify_server_down",
+					fmt.Sprintf("节点下线 — %s:%d", s.Address, s.Port),
+					fmt.Sprintf("规则：%s\n节点：%s:%d\n错误：%s\n时间：%s",
+						r.Name, s.Address, s.Port, res.Err, now))
 			}
-			db.DB.Exec(`UPDATE upstream_servers SET state=?,fail_count=?,success_count=?,last_check_at=?,last_err=? WHERE id=?`,
+			db.AsyncExec(`UPDATE upstream_servers SET state=?,fail_count=?,success_count=?,last_check_at=?,last_err=? WHERE id=?`,
 				s.State, newFail, newSuccess, now, res.Err, s.ID)
 		}
 		_ = prevState

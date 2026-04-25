@@ -5,7 +5,7 @@
       <el-button @click="load">刷新</el-button>
     </div>
     <el-card>
-      <el-table :data="list" size="small">
+      <el-table :data="pagedList" size="small">
         <el-table-column prop="rule_name" label="规则" />
         <el-table-column label="节点">
           <template #default="{row}">{{ row.address }}:{{ row.port }}</template>
@@ -27,16 +27,21 @@
           </template>
         </el-table-column>
       </el-table>
+      <Pagination :total="list.length" :page-size="PAGE_SIZE" v-model:current="page" />
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../api'
+import Pagination from '../components/Pagination.vue'
 
+const PAGE_SIZE = 30
 const list = ref([])
+const page = ref(1)
+const pagedList = computed(() => list.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 let timer = null
 
 async function load() {

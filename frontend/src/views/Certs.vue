@@ -8,7 +8,7 @@
       </div>
     </div>
     <el-card>
-      <el-table :data="list" size="small">
+      <el-table :data="pagedList" size="small">
         <el-table-column prop="domain" label="域名" />
         <el-table-column prop="expire_at" label="到期时间" width="180" />
         <el-table-column label="剩余天数" width="100">
@@ -39,6 +39,7 @@
           </template>
         </el-table-column>
       </el-table>
+      <Pagination :total="list.length" :page-size="PAGE_SIZE" v-model:current="page" />
     </el-card>
 
     <!-- 申请证书对话框 -->
@@ -124,8 +125,12 @@
 import { ref, computed, nextTick, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import Pagination from '../components/Pagination.vue'
 
+const PAGE_SIZE = 30
 const list = ref([])
+const page = ref(1)
+const pagedList = computed(() => list.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 
 // 申请证书
 const applyShow = ref(false)
@@ -171,7 +176,7 @@ let logPollTimer = null
 const logLines = computed(() => logText.value ? logText.value.split('\n').filter(l => l) : [])
 
 function statusLabel(s) {
-  return { pending: '续签中', success: '已续签', failed: '续签失败', '': '未续签' }[s] || s || '未续签'
+  return { pending: '续签中', success: '已续签', failed: '续签失败', idle: '未续签', '': '未续签' }[s] ?? s ?? '未续签'
 }
 function statusTagType(s) {
   return { pending: 'warning', success: 'success', failed: 'danger' }[s] || 'info'

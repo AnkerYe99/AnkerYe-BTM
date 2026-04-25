@@ -8,22 +8,59 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+// DB 用于同步读写（用户操作、规则 CRUD 等需要立即返回结果的场景）
 var DB *sql.DB
 
+// asyncCh 是异步写队列，健康检查/统计等高频写入投入此 channel，
+// 由单个 writer goroutine 串行消费，无论多少 worker 并发都不会阻塞调用方。
+// 缓冲 100000 足以应对数千 worker 的突发。
+var asyncCh = make(chan asyncOp, 100000)
+
+type asyncOp struct {
+	query string
+	args  []interface{}
+}
+
+// AsyncExec 火且忘：写入 channel 立即返回，不阻塞调用方。
+// 适用于健康检查状态更新、统计累积等允许丢失单次的场景。
+func AsyncExec(query string, args ...interface{}) {
+	select {
+	case asyncCh <- asyncOp{query, args}:
+	default:
+		// channel 满时静默丢弃（正常情况不会发生）
+		log.Printf("[db] async queue full, write dropped")
+	}
+}
+
+func startAsyncWriter() {
+	go func() {
+		for op := range asyncCh {
+			if _, err := DB.Exec(op.query, op.args...); err != nil {
+				log.Printf("[db] async exec error: %v", err)
+			}
+		}
+	}()
+}
+
 func Init(path string) error {
+	// 读连接池：WAL 模式允许多个并发读，不限制连接数
 	dsn := fmt.Sprintf("file:%s?_journal=WAL&_busy_timeout=5000&_fk=on", path)
 	var err error
 	DB, err = sql.Open("sqlite3", dsn)
 	if err != nil {
 		return err
 	}
-	DB.SetMaxOpenConns(1) // SQLite 单写避免锁冲突
+	// 读操作允许并发；写操作通过 AsyncExec channel 串行化，
+	// 不再依赖连接数来限制并发写，彻底解决高并发下的连接排队问题。
+	DB.SetMaxOpenConns(16)
+	DB.SetMaxIdleConns(16)
 	if err := DB.Ping(); err != nil {
 		return err
 	}
 	if err := migrate(); err != nil {
 		return err
 	}
+	startAsyncWriter()
 	log.Println("[db] ready:", path)
 	return nil
 }
@@ -169,7 +206,15 @@ func migrate() error {
 		"tencent_secret_key":         "",
 		"tencent_dns_region":         "ap-guangzhou",
 		"sync_token":                 "",
+		"sync_rules_token":           "",
+		"sync_certs_token":           "",
+		"cert_renew_disabled":        "0",
 		"notify_mm_webhook":          "",
+		"notify_email_to":            "",
+		"notify_cert_fail":           "1",
+		"notify_cert_success":        "0",
+		"notify_server_down":         "1",
+		"notify_server_up":           "0",
 		"default_log_max_size":       "5M",
 	}
 	for k, v := range defaults {

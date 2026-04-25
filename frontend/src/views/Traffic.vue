@@ -47,7 +47,7 @@
 
     <!-- 明细表格 -->
     <el-card>
-      <el-table :data="list" size="small" v-loading="loading">
+      <el-table :data="pagedList" size="small" v-loading="loading">
         <el-table-column label="站点" min-width="160">
           <template #default="{row}">
             <el-tag size="small" :type="protoTagType(row.protocol)" style="margin-right:6px">{{ row.protocol.toUpperCase() }}</el-tag>
@@ -97,17 +97,25 @@
       <div v-if="!loading && list.every(r=>r.requests===0)" style="text-align:center;color:#909399;padding:32px 0;font-size:13px">
         暂无数据，统计每分钟自动采集一次
       </div>
+      <Pagination :total="list.length" :page-size="PAGE_SIZE" v-model:current="page" />
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import api from '../api'
+import Pagination from '../components/Pagination.vue'
 
+const PAGE_SIZE = 30
 const period = ref('today')
 const list = ref([])
 const loading = ref(false)
+const page = ref(1)
+
+watch(period, () => { page.value = 1 })
+
+const pagedList = computed(() => list.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 
 async function load() {
   loading.value = true

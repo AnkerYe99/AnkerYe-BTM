@@ -124,7 +124,12 @@
       <template #header>
         <div style="display:flex;justify-content:space-between;align-items:center">
           <span><el-icon style="vertical-align:-2px"><Connection /></el-icon> 节点健康状态</span>
-          <el-button size="small" icon="Refresh" @click="load" :loading="loading">刷新</el-button>
+          <div style="display:flex;gap:8px;align-items:center">
+            <el-button size="small" :type="sortByReq?'primary':'default'" @click="sortByReq=!sortByReq">
+              {{ sortByReq ? '▼ 浏览量排序' : '默认排序' }}
+            </el-button>
+            <el-button size="small" icon="Refresh" @click="load" :loading="loading">刷新</el-button>
+          </div>
         </div>
       </template>
       <el-table :data="serverRows" size="small" :span-method="spanMethod"
@@ -270,8 +275,28 @@ const h24Traffic = computed(() => traffic24h.value.reduce((acc, r) => {
   return acc
 }, { requests: 0, bytes_out: 0 }))
 
-// 节点表格数据（已按 rule_id 排序，后端 ORDER BY r.id, s.id）
-const serverRows = computed(() => serverHealth.value)
+const sortByReq = ref(true)
+
+// 按规则今日请求总量排序后展开的扁平列表，保持同规则节点连续
+const sortedServerHealth = computed(() => {
+  const raw = serverHealth.value
+  if (!sortByReq.value) return raw
+  // 按 rule_id 分组
+  const groups = []
+  const seen = {}
+  for (const r of raw) {
+    if (!seen[r.rule_id]) { seen[r.rule_id] = []; groups.push(seen[r.rule_id]) }
+    seen[r.rule_id].push(r)
+  }
+  // 每组按 today_req 总和排序
+  groups.sort((a, b) =>
+    b.reduce((s, r) => s + r.today_req, 0) - a.reduce((s, r) => s + r.today_req, 0)
+  )
+  return groups.flat()
+})
+
+// 节点表格数据
+const serverRows = computed(() => sortedServerHealth.value)
 
 // 每条规则的下线节点数
 const ruleDownMap = computed(() => {
@@ -286,7 +311,7 @@ const ruleDownMap = computed(() => {
 // el-table span-method：规则名列按规则分组合并行
 const spanMap = computed(() => {
   const map = {}
-  const rows = serverHealth.value
+  const rows = sortedServerHealth.value
   let i = 0
   while (i < rows.length) {
     const ruleId = rows[i].rule_id

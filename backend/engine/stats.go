@@ -132,7 +132,7 @@ func flushRuleStats(ruleID int64, days map[string]*dayStat) {
 		if s.requests == 0 {
 			continue
 		}
-		db.DB.Exec(`INSERT INTO rule_stats(rule_id,date,requests,bytes_out,s1xx,s2xx,s3xx,s4xx,s5xx)
+		db.AsyncExec(`INSERT INTO rule_stats(rule_id,date,requests,bytes_out,s1xx,s2xx,s3xx,s4xx,s5xx)
 			VALUES(?,?,?,?,?,?,?,?,?)
 			ON CONFLICT(rule_id,date) DO UPDATE SET
 			requests=requests+excluded.requests, bytes_out=bytes_out+excluded.bytes_out,
@@ -149,7 +149,7 @@ func flushServerStats(serverDays map[int64]map[string]*dayStat) {
 			if s.requests == 0 {
 				continue
 			}
-			db.DB.Exec(`INSERT INTO server_stats(server_id,date,requests,bytes_out,s1xx,s2xx,s3xx,s4xx,s5xx)
+			db.AsyncExec(`INSERT INTO server_stats(server_id,date,requests,bytes_out,s1xx,s2xx,s3xx,s4xx,s5xx)
 				VALUES(?,?,?,?,?,?,?,?,?)
 				ON CONFLICT(server_id,date) DO UPDATE SET
 				requests=requests+excluded.requests, bytes_out=bytes_out+excluded.bytes_out,
@@ -227,7 +227,7 @@ func parseLogFile(ruleID int64, logFile string, isStream bool, serverMap map[str
 	}
 
 	newOffset, _ := f.Seek(0, 1)
-	db.DB.Exec(`INSERT INTO log_parse_state(log_file,inode,offset) VALUES(?,?,?)
+	db.AsyncExec(`INSERT INTO log_parse_state(log_file,inode,offset) VALUES(?,?,?)
 		ON CONFLICT(log_file) DO UPDATE SET inode=excluded.inode, offset=excluded.offset`,
 		logFile, curInode, newOffset)
 

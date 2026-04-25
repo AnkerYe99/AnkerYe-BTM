@@ -5,7 +5,7 @@
       :class="['sidebar', { 'sidebar-open': sideOpen || !isMobile }]">
       <div class="logo">
         <el-icon :size="22" color="#409EFF"><Promotion /></el-icon>
-        <span>NginxFlow</span>
+        <span>AnkerYe</span>
       </div>
       <el-menu :default-active="$route.path" router @select="isMobile && (sideOpen=false)">
         <el-menu-item index="/dashboard"><el-icon><DataAnalysis/></el-icon><span>总览</span></el-menu-item>
@@ -13,20 +13,18 @@
         <el-menu-item index="/servers"><el-icon><Monitor/></el-icon><span>节点监控</span></el-menu-item>
         <el-menu-item index="/certs"><el-icon><Lock/></el-icon><span>SSL证书</span></el-menu-item>
         <el-menu-item index="/traffic"><el-icon><TrendCharts/></el-icon><span>流量统计</span></el-menu-item>
+        <el-menu-item index="/errorlogs"><el-icon><Warning/></el-icon><span>出错日志</span></el-menu-item>
         <el-menu-item index="/sync"><el-icon><Share/></el-icon><span>从节点</span></el-menu-item>
         <el-menu-item index="/settings"><el-icon><Setting/></el-icon><span>系统设置</span></el-menu-item>
       </el-menu>
-    </el-aside>
-    <el-container class="main-wrap">
-      <el-header class="header">
-        <el-icon v-if="isMobile" class="hamburger" :size="22" @click="sideOpen=!sideOpen"><Menu /></el-icon>
-        <span v-else></span>
-        <el-dropdown @command="handleDropdown">
-          <span class="user-info">
+      <!-- 账号信息固定在侧边栏底部 -->
+      <div class="sidebar-user">
+        <el-dropdown @command="handleDropdown" placement="top-start" style="width:100%">
+          <div class="sidebar-user-inner">
             <el-icon><User/></el-icon>
-            {{ username }}
-            <el-icon><ArrowDown/></el-icon>
-          </span>
+            <span class="sidebar-username">{{ username }}</span>
+            <el-icon class="sidebar-arrow"><ArrowDown/></el-icon>
+          </div>
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item disabled style="font-size:12px;color:#999">
@@ -37,8 +35,14 @@
             </el-dropdown-menu>
           </template>
         </el-dropdown>
-      </el-header>
-      <el-main><router-view /></el-main>
+      </div>
+    </el-aside>
+    <el-container class="main-wrap">
+      <!-- 移动端汉堡菜单保留 -->
+      <div v-if="isMobile" class="mobile-header">
+        <el-icon class="hamburger" :size="22" @click="sideOpen=!sideOpen"><Menu /></el-icon>
+      </div>
+      <el-main :class="{ 'main-no-header': !isMobile }"><router-view /></el-main>
       <el-footer class="footer" height="36px">
         <a href="mailto:AnkerYe@gmail.com">Copyright © AnkerYe. All rights reserved.</a>
       </el-footer>
@@ -161,16 +165,22 @@ function logout() {
   display: flex; flex-direction: column; transition: transform 0.25s; }
 .logo { display: flex; align-items: center; gap: 10px; padding: 16px;
   font-size: 17px; font-weight: bold; color: #fff; border-bottom: 1px solid #112; flex-shrink: 0; }
-.el-menu { border-right: none !important; background: #001529; flex: 1; }
+.el-menu { border-right: none !important; background: #001529; flex: 1; overflow-y: auto; }
 :deep(.el-menu-item) { color: #c8ced4; }
 :deep(.el-menu-item.is-active) { background: #1890ff !important; color: #fff !important; }
 :deep(.el-menu-item:hover) { background: #112240 !important; }
+.sidebar-user { border-top: 1px solid #112240; padding: 12px 16px; flex-shrink: 0; }
+.sidebar-user-inner { display: flex; align-items: center; gap: 8px; cursor: pointer;
+  color: #c8ced4; padding: 6px 4px; border-radius: 6px; transition: background 0.2s; }
+.sidebar-user-inner:hover { background: #112240; }
+.sidebar-username { flex: 1; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-arrow { font-size: 12px; color: #8a9ba8; }
 .main-wrap { display: flex; flex-direction: column; overflow: hidden; }
-.header { background: #fff; display: flex; justify-content: space-between; align-items: center;
+.mobile-header { background: #fff; height: 50px; display: flex; align-items: center; padding: 0 16px;
   box-shadow: 0 1px 4px rgba(0,21,41,.08); flex-shrink: 0; }
-.user-info { display: flex; align-items: center; gap: 6px; cursor: pointer; color: #606266; }
 .hamburger { cursor: pointer; color: #333; }
 .el-main { background: #f0f2f5; padding: 16px; overflow-y: auto; flex: 1; }
+.main-no-header { }
 .footer { background: #fff; display: flex; align-items: center; justify-content: center;
   border-top: 1px solid #f0f0f0; }
 .footer a { font-size: 12px; color: #999; text-decoration: none; }

@@ -190,6 +190,12 @@ func ApplyCert(c *gin.Context) {
 }
 
 func ManualRenew(c *gin.Context) {
+	var disabled string
+	db.DB.QueryRow(`SELECT v FROM system_settings WHERE k='cert_renew_disabled'`).Scan(&disabled)
+	if disabled == "1" {
+		util.Fail(c, 403, "本机已禁用证书续签（从节点模式），请在主节点上操作")
+		return
+	}
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	var domain string
 	if err := db.DB.QueryRow(`SELECT domain FROM ssl_certs WHERE id=?`, id).Scan(&domain); err != nil {
