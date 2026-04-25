@@ -10,7 +10,7 @@ set -e
 INSTALL_DIR="/opt/nginxflow"
 DATA_DIR="$INSTALL_DIR/data"
 SERVICE_NAME="nginxflow"
-GITEA="http://59.57.180.176:53000"
+GITEA="${GITEA_URL:-http://10.14.6.51:3000}"
 REPO="anker/nginxflow"
 PORT="${NGINXFLOW_PORT:-9000}"
 
