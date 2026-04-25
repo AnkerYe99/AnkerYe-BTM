@@ -10,9 +10,18 @@ set -e
 INSTALL_DIR="/opt/nginxflow"
 DATA_DIR="$INSTALL_DIR/data"
 SERVICE_NAME="nginxflow"
-GITEA="${GITEA_URL:-http://10.14.6.51:3000}"
 REPO="anker/nginxflow"
 PORT="${NGINXFLOW_PORT:-9000}"
+
+# 自动探测可用的 Gitea 地址
+GITEA=""
+for _url in "http://10.14.6.51:3000" "http://59.57.180.176:53000"; do
+  if curl -sf --connect-timeout 3 "$_url/api/v1/repos/$REPO" -o /dev/null 2>/dev/null; then
+    GITEA="$_url"
+    break
+  fi
+done
+[[ -z "$GITEA" ]] && { echo -e "\033[0;31m[✗]\033[0m 无法连接 Gitea，请检查网络"; exit 1; }
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[✓]${NC} $*"; }
