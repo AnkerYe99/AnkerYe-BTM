@@ -3,14 +3,14 @@ set -e
 
 # ============================================================
 #  NginxFlow 一键安装脚本
-#  用法: curl -sSL http://10.14.6.51:3000/anker/nginxflow/raw/branch/master/install.sh | bash
+#  用法: curl -sSL http://59.57.180.176:53000/anker/nginxflow/raw/branch/master/install.sh | bash
 #  自定义端口: NGINXFLOW_PORT=8080 bash install.sh
 # ============================================================
 
 INSTALL_DIR="/opt/nginxflow"
 DATA_DIR="$INSTALL_DIR/data"
 SERVICE_NAME="nginxflow"
-GITEA="http://10.14.6.51:3000"
+GITEA="http://59.57.180.176:53000"
 REPO="anker/nginxflow"
 PORT="${NGINXFLOW_PORT:-9000}"
 
