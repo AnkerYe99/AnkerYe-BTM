@@ -110,8 +110,7 @@ DL_URL=$(echo "$RELEASE_JSON" | _parse_asset_url)
 info "最新版本: $LATEST_TAG"
 info "下载地址: $DL_URL"
 
-DL_TMP="/tmp/nginxflow-server"
-[[ ! -w /tmp ]] && DL_TMP="/root/nginxflow-server-dl"
+DL_TMP=$(mktemp /tmp/nginxflow-XXXXXX 2>/dev/null || echo "/root/nginxflow-server-dl")
 curl -fL --progress-bar -o "$DL_TMP" "$DL_URL" || error "下载失败"
 chmod +x "$DL_TMP"
 info "下载完成"
