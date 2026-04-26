@@ -11,19 +11,20 @@
     <!-- 搜索栏 -->
     <el-card shadow="never" style="margin-bottom:12px">
       <div class="search-row">
-        <el-input v-model="q.value" placeholder="搜索值" clearable size="small" style="width:180px" />
-        <el-input v-model="q.note" placeholder="搜索备注" clearable size="small" style="width:160px" />
-        <el-select v-model="q.status" placeholder="状态" clearable style="width:90px" size="small">
+        <el-input v-model="q.value" placeholder="值" clearable size="small" style="width:160px" />
+        <el-input v-model="q.note" placeholder="备注" clearable size="small" style="width:140px" />
+        <el-select v-model="q.status" placeholder="状态" clearable style="width:85px" size="small">
           <el-option label="启用" value="1" />
           <el-option label="停用" value="0" />
         </el-select>
         <el-button size="small" @click="resetQ">重置</el-button>
+        <el-button size="small" type="primary" :icon="Search" @click="doSearch">搜索</el-button>
       </div>
     </el-card>
 
     <!-- 表格 -->
     <el-card shadow="never" v-loading="loading">
-      <el-table :data="filtered" stripe size="small" style="width:100%">
+      <el-table :data="pagedList" stripe size="small" style="width:100%">
         <el-table-column label="类型" width="72">
           <template #default="{row}">
             <el-tag type="success" size="small">{{ row.type }}</el-tag>
@@ -51,9 +52,7 @@
           </template>
         </el-table-column>
       </el-table>
-      <div style="margin-top:8px;color:#999;font-size:12px">
-        显示 {{ filtered.length }} 条 / 共 {{ list.length }} 条
-      </div>
+      <Pagination :total="filtered.length" :page-size="PAGE_SIZE" v-model:current="page" />
     </el-card>
 
     <!-- 添加对话框 -->
@@ -83,20 +82,26 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh } from '@element-plus/icons-vue'
+import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import api from '../api'
+import Pagination from '../components/Pagination.vue'
+
+const PAGE_SIZE = 30
 
 const list = ref([])
 const loading = ref(false)
 const wlDialog = ref(false)
 const saving = ref(false)
 const form = ref({ type: 'ip', value: '', note: '' })
+const page = ref(1)
 
-const q = ref({ value: '', note: '', status: '' })
+const emptyQ = () => ({ value: '', note: '', status: '' })
+const q = ref(emptyQ())
+const activeQ = ref(emptyQ())
 
 const filtered = computed(() => {
   let r = list.value
-  const { value, note, status } = q.value
+  const { value, note, status } = activeQ.value
   if (value) r = r.filter(x => (x.value || '').toLowerCase().includes(value.toLowerCase()))
   if (note) r = r.filter(x => (x.note || '').toLowerCase().includes(note.toLowerCase()))
   if (status === '1') r = r.filter(x => x.enabled)
@@ -104,13 +109,19 @@ const filtered = computed(() => {
   return r
 })
 
+const pagedList = computed(() => filtered.value.slice((page.value-1)*PAGE_SIZE, page.value*PAGE_SIZE))
+
 function fmtDate(s) {
   if (!s) return '-'
   return s.replace('T', ' ').slice(0, 16)
 }
 
+function doSearch() { activeQ.value = { ...q.value }; page.value = 1 }
+
 function resetQ() {
-  q.value = { value: '', note: '', status: '' }
+  q.value = emptyQ()
+  activeQ.value = emptyQ()
+  page.value = 1
 }
 
 async function load() {

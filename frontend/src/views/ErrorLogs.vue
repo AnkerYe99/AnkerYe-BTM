@@ -12,13 +12,13 @@
         <el-date-picker
           v-model="filter.dateRange"
           type="daterange"
-          range-separator="至"
-          start-placeholder="开始日期"
-          end-placeholder="结束日期"
+          range-separator="~"
+          start-placeholder="开始"
+          end-placeholder="结束"
           format="YYYY-MM-DD"
           value-format="YYYY-MM-DD"
           :clearable="false"
-          style="width:240px"
+          style="width:195px"
           @change="load"
         />
 

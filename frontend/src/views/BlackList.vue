@@ -12,35 +12,36 @@
     <!-- 搜索栏 -->
     <el-card shadow="never" style="margin-bottom:12px">
       <div class="search-row">
-        <el-date-picker v-model="q.dateRange" type="daterange" range-separator="至"
-          start-placeholder="开始日期" end-placeholder="结束日期"
+        <el-date-picker v-model="q.dateRange" type="daterange" range-separator="~"
+          start-placeholder="开始" end-placeholder="结束"
           format="YYYY-MM-DD" value-format="YYYY-MM-DD" :clearable="true"
-          style="width:230px" size="small" />
-        <el-select v-model="q.type" placeholder="类型" clearable style="width:110px" size="small">
+          style="width:195px" size="small" />
+        <el-select v-model="q.type" placeholder="类型" clearable style="width:100px" size="small">
           <el-option label="IP" value="ip" />
           <el-option label="CIDR" value="cidr" />
           <el-option label="路径" value="path" />
           <el-option label="UA" value="ua" />
           <el-option label="方法" value="method" />
         </el-select>
-        <el-input v-model="q.value" placeholder="搜索值" clearable size="small" style="width:160px" />
-        <el-input v-model="q.note" placeholder="搜索备注" clearable size="small" style="width:140px" />
-        <el-select v-model="q.source" placeholder="来源" clearable style="width:100px" size="small">
+        <el-input v-model="q.value" placeholder="值" clearable size="small" style="width:130px" />
+        <el-input v-model="q.note" placeholder="备注" clearable size="small" style="width:120px" />
+        <el-select v-model="q.source" placeholder="来源" clearable style="width:95px" size="small">
           <el-option label="自动封锁" value="auto" />
           <el-option label="手动添加" value="manual" />
         </el-select>
-        <el-select v-model="q.status" placeholder="状态" clearable style="width:90px" size="small">
+        <el-select v-model="q.status" placeholder="状态" clearable style="width:85px" size="small">
           <el-option label="启用" value="1" />
           <el-option label="停用" value="0" />
         </el-select>
-        <el-checkbox v-model="q.hitsOnly" size="small">仅显示命中</el-checkbox>
+        <el-checkbox v-model="q.hitsOnly" size="small">仅命中</el-checkbox>
         <el-button size="small" @click="resetQ">重置</el-button>
+        <el-button size="small" type="primary" :icon="Search" @click="doSearch">搜索</el-button>
       </div>
     </el-card>
 
     <!-- 表格 -->
     <el-card shadow="never" v-loading="loading">
-      <el-table :data="filtered" stripe size="small" style="width:100%">
+      <el-table :data="pagedList" stripe size="small" style="width:100%">
         <el-table-column label="类型" width="72">
           <template #default="{row}">
             <el-tag :type="typeColor(row.type)" size="small">{{ row.type }}</el-tag>
@@ -75,9 +76,7 @@
           </template>
         </el-table-column>
       </el-table>
-      <div style="margin-top:8px;color:#999;font-size:12px">
-        显示 {{ filtered.length }} 条 / 共 {{ list.length }} 条
-      </div>
+      <Pagination :total="filtered.length" :page-size="PAGE_SIZE" v-model:current="page" />
     </el-card>
 
     <!-- 添加对话框 -->
@@ -110,8 +109,17 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh } from '@element-plus/icons-vue'
+import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import api from '../api'
+import Pagination from '../components/Pagination.vue'
+
+const PAGE_SIZE = 30
+
+function fmtLocalDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+}
+function daysAgo(n) { const d = new Date(); d.setDate(d.getDate()-n); return fmtLocalDate(d) }
+function today() { return fmtLocalDate(new Date()) }
 
 const list = ref([])
 const loading = ref(false)
@@ -120,7 +128,10 @@ const blDialog = ref(false)
 const saving = ref(false)
 const form = ref({ type: 'ip', value: '', note: '' })
 
-const q = ref({ dateRange: null, type: '', value: '', note: '', source: '', status: '', hitsOnly: false })
+const emptyQ = () => ({ dateRange: [daysAgo(6), today()], type: '', value: '', note: '', source: '', status: '', hitsOnly: false })
+const q = ref(emptyQ())
+const activeQ = ref(emptyQ())
+const page = ref(1)
 
 const placeholder = computed(() => {
   const m = { ip: '如 1.2.3.4', cidr: '如 10.0.0.0/8', path: '如 ~*\\.php', ua: '如 ~*sqlmap', method: '如 PROPFIND' }
@@ -129,13 +140,10 @@ const placeholder = computed(() => {
 
 const filtered = computed(() => {
   let r = list.value
-  const { dateRange, type, value, note, source, status, hitsOnly } = q.value
+  const { dateRange, type, value, note, source, status, hitsOnly } = activeQ.value
   if (dateRange && dateRange[0]) {
     const [s, e] = dateRange
-    r = r.filter(x => {
-      const d = (x.created_at || '').slice(0, 10)
-      return d >= s && d <= e
-    })
+    r = r.filter(x => { const d = (x.created_at || '').slice(0, 10); return d >= s && d <= e })
   }
   if (type) r = r.filter(x => x.type === type)
   if (value) r = r.filter(x => (x.value || '').toLowerCase().includes(value.toLowerCase()))
@@ -157,8 +165,14 @@ function fmtDate(s) {
   return s.replace('T', ' ').slice(0, 16)
 }
 
+const pagedList = computed(() => filtered.value.slice((page.value-1)*PAGE_SIZE, page.value*PAGE_SIZE))
+
+function doSearch() { activeQ.value = { ...q.value }; page.value = 1 }
+
 function resetQ() {
-  q.value = { dateRange: null, type: '', value: '', note: '', source: '', status: '', hitsOnly: false }
+  q.value = emptyQ()
+  activeQ.value = emptyQ()
+  page.value = 1
 }
 
 async function load() {
