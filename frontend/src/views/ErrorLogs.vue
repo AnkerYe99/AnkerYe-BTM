@@ -38,8 +38,9 @@
       <div v-if="list.length > 0" class="result-hint">
         共 <b>{{ list.length }}</b> 条错误记录
         <span v-if="stat4xx || stat5xx" style="margin-left:16px">
-          <el-tag type="warning" size="small" style="margin-right:6px">4xx {{ stat4xx }}</el-tag>
-          <el-tag type="danger" size="small">5xx {{ stat5xx }}</el-tag>
+          <el-tag type="danger" size="small" style="margin-right:6px" v-if="stat444">拦截 {{ stat444 }}</el-tag>
+          <el-tag type="warning" size="small" style="margin-right:6px" v-if="stat4xx">4xx {{ stat4xx }}</el-tag>
+          <el-tag type="danger" size="small" v-if="stat5xx">5xx {{ stat5xx }}</el-tag>
         </span>
       </div>
     </el-card>
@@ -58,7 +59,10 @@
         <el-table-column label="请求路径" prop="path" min-width="220" show-overflow-tooltip />
         <el-table-column label="状态码" prop="status" width="90">
           <template #default="{row}">
-            <el-tag :type="row.status>=500?'danger':'warning'" size="small" effect="dark">
+            <el-tag v-if="row.status===444" type="danger" size="small" effect="dark" style="font-weight:700;letter-spacing:1px">
+              拦截
+            </el-tag>
+            <el-tag v-else :type="row.status>=500?'danger':'warning'" size="small" effect="dark">
               {{ row.status }}
             </el-tag>
           </template>
@@ -110,7 +114,8 @@ const autoRefresh = ref(false)
 const page = ref(1)
 let timer = null
 
-const stat4xx = computed(() => list.value.filter(r => r.status >= 400 && r.status < 500).length)
+const stat444 = computed(() => list.value.filter(r => r.status === 444).length)
+const stat4xx = computed(() => list.value.filter(r => r.status >= 400 && r.status < 500 && r.status !== 444).length)
 const stat5xx = computed(() => list.value.filter(r => r.status >= 500).length)
 const pagedList = computed(() => list.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 
@@ -138,6 +143,7 @@ function toggleAuto(val) {
 }
 
 function rowClass({ row }) {
+  if (row.status === 444) return 'row-444'
   return row.status >= 500 ? 'row-5xx' : 'row-4xx'
 }
 
@@ -188,6 +194,9 @@ onUnmounted(() => clearInterval(timer))
 }
 .table-card { }
 .empty-hint { padding: 40px 0; }
+:deep(.row-444) { background: #fff0f0 !important; }
+:deep(.row-444 td) { color: #cf1322 !important; font-weight: 500; }
+:deep(.row-444:hover > td) { background: #ffd6d6 !important; }
 :deep(.row-5xx) { background: #fff2f0 !important; }
 :deep(.row-5xx:hover > td) { background: #ffe4e0 !important; }
 :deep(.row-4xx) { }
