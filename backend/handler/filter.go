@@ -50,12 +50,12 @@ func AddBlacklist(c *gin.Context) {
 		if _, _, err := net.ParseCIDR(body.Value); err != nil {
 			util.Fail(c, 400, "无效 CIDR"); return
 		}
-	case "path", "ua":
+	case "path", "ua", "method":
 		if body.Value == "" {
 			util.Fail(c, 400, "值不能为空"); return
 		}
 	default:
-		util.Fail(c, 400, "类型必须是 ip/cidr/path/ua"); return
+		util.Fail(c, 400, "类型必须是 ip/cidr/path/ua/method"); return
 	}
 	res, err := db.DB.Exec(
 		`INSERT INTO filter_blacklist(type,value,note) VALUES(?,?,?)`,

@@ -197,7 +197,7 @@ var versionedMigrations = []struct {
 	{2, "add_filter_tables", []string{
 		`CREATE TABLE IF NOT EXISTS filter_blacklist (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
-			type       TEXT    NOT NULL CHECK(type IN ('ip','cidr','path','ua')),
+			type       TEXT    NOT NULL CHECK(type IN ('ip','cidr','path','ua','method')),
 			value      TEXT    NOT NULL,
 			note       TEXT    DEFAULT '',
 			hits       INTEGER DEFAULT 0,
@@ -244,6 +244,30 @@ var versionedMigrations = []struct {
 			('ua','~*w3af','W3AF 扫描'),
 			('ua','~*burpsuite','Burp Suite 代理'),
 			('ua','~*dirsearch','Dirsearch 目录扫描')`,
+	}},
+	{3, "add_method_filter", []string{
+		// 重建 filter_blacklist，将 CHECK 约束扩展支持 method 类型
+		`ALTER TABLE filter_blacklist RENAME TO _filter_blacklist_v2`,
+		`CREATE TABLE filter_blacklist (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			type       TEXT    NOT NULL CHECK(type IN ('ip','cidr','path','ua','method')),
+			value      TEXT    NOT NULL,
+			note       TEXT    DEFAULT '',
+			hits       INTEGER DEFAULT 0,
+			auto_added INTEGER DEFAULT 0,
+			enabled    INTEGER DEFAULT 1,
+			created_at DATETIME DEFAULT (datetime('now','localtime'))
+		)`,
+		`INSERT INTO filter_blacklist SELECT * FROM _filter_blacklist_v2`,
+		`DROP TABLE _filter_blacklist_v2`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_filter_bl ON filter_blacklist(type,value)`,
+		// 内置方法黑名单：非标准/危险 HTTP 方法
+		`INSERT OR IGNORE INTO filter_blacklist(type,value,note) VALUES
+			('method','PRI','HTTP/2 预连接探测，常见于扫描器'),
+			('method','PROPFIND','WebDAV 目录枚举，用于探测文件结构'),
+			('method','MGLNDD','自动化扫描工具私有标识，无正常业务用途'),
+			('method','CONNECT','代理穿透尝试'),
+			('method','TRACE','HTTP TRACE 方法，可用于 XST 攻击')`,
 	}},
 }
 

@@ -13,6 +13,7 @@
                   <el-option label="CIDR" value="cidr" />
                   <el-option label="路径" value="path" />
                   <el-option label="UA" value="ua" />
+                  <el-option label="方法" value="method" />
                   <el-option label="自动封锁" value="auto" />
                 </el-select>
                 <el-button type="primary" size="small" @click="blDialog=true" :icon="Plus">添加</el-button>
@@ -94,6 +95,7 @@
             <el-option label="CIDR 段" value="cidr" />
             <el-option label="路径 (正则)" value="path" />
             <el-option label="User-Agent (正则)" value="ua" />
+            <el-option label="HTTP 方法" value="method" />
           </el-select>
         </el-form-item>
         <el-form-item label="值" required>
@@ -161,12 +163,12 @@ const filteredBl = computed(() => {
 })
 
 const blPlaceholder = computed(() => {
-  const m = { ip: '如 1.2.3.4', cidr: '如 10.0.0.0/8', path: '如 ~*/wp-login.php', ua: '如 ~*sqlmap' }
+  const m = { ip: '如 1.2.3.4', cidr: '如 10.0.0.0/8', path: '如 ~*/wp-login.php', ua: '如 ~*sqlmap', method: '如 PROPFIND' }
   return m[blForm.value.type] || ''
 })
 
 function typeColor(t) {
-  return { ip: 'danger', cidr: 'warning', path: 'primary', ua: '' }[t] || 'info'
+  return { ip: 'danger', cidr: 'warning', path: 'primary', ua: '', method: 'danger' }[t] || 'info'
 }
 
 async function loadBl() {

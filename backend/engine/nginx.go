@@ -128,10 +128,11 @@ func RenderRule(r *model.Rule) (string, error) {
 func filterCheckBlock() string {
 	return `    # AnkerYe - Flow 全局过滤（白名单优先级高于黑名单）
     set $__nf_block 0;
-    if ($__nf_bl_ip)   { set $__nf_block 1; }
-    if ($__nf_bl_path) { set $__nf_block 1; }
-    if ($__nf_bl_ua)   { set $__nf_block 1; }
-    if ($__nf_wl)      { set $__nf_block 0; }
+    if ($__nf_bl_ip)     { set $__nf_block 1; }
+    if ($__nf_bl_path)   { set $__nf_block 1; }
+    if ($__nf_bl_ua)     { set $__nf_block 1; }
+    if ($__nf_bl_method) { set $__nf_block 1; }
+    if ($__nf_wl)        { set $__nf_block 0; }
 `
 }
 

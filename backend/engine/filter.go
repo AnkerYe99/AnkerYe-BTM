@@ -106,6 +106,19 @@ func buildFilterConf() (string, error) {
 		}
 		rows.Close()
 	}
+	sb.WriteString("}\n\n")
+
+	// 黑名单方法 map（拦截非标准/危险 HTTP 方法）
+	sb.WriteString("map $request_method $__nf_bl_method {\n    default 0;\n")
+	rows, _ = db.DB.Query(`SELECT value FROM filter_blacklist WHERE type='method' AND enabled=1`)
+	if rows != nil {
+		for rows.Next() {
+			var v string
+			rows.Scan(&v)
+			sb.WriteString(fmt.Sprintf("    \"%s\" 1;\n", v))
+		}
+		rows.Close()
+	}
 	sb.WriteString("}\n")
 
 	return sb.String(), nil
