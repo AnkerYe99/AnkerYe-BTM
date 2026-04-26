@@ -17,6 +17,7 @@ const routes = [
       { path: 'traffic', name: 'traffic', component: () => import('../views/Traffic.vue') },
       { path: 'errorlogs', name: 'errorlogs', component: () => import('../views/ErrorLogs.vue') },
       { path: 'sync', name: 'sync', component: () => import('../views/SyncNodes.vue') },
+      { path: 'filter', name: 'filter', component: () => import('../views/FilterList.vue') },
       { path: 'settings', name: 'settings', component: () => import('../views/Settings.vue') }
     ]
   }

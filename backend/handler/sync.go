@@ -9,9 +9,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"nginxflow/db"
-	"nginxflow/engine"
-	"nginxflow/util"
+	"ankerye-flow/db"
+	"ankerye-flow/engine"
+	"ankerye-flow/util"
 )
 
 // 从节点拉取配置（无 JWT，用 sync_token 鉴权）
@@ -197,11 +197,42 @@ func SyncRulesExport(c *gin.Context) {
 	db.DB.Exec(`UPDATE sync_nodes SET last_sync_at=?,last_version=?,status='ok',last_err=''
 		WHERE address=?`, time.Now().Format("2006-01-02 15:04:05"), version, fromAddr)
 
+	// 导出黑白名单供从节点 UI 显示
+	filterBL := []gin.H{}
+	blrows, _ := db.DB.Query(`SELECT type,value,note,hits,auto_added,enabled FROM filter_blacklist ORDER BY id`)
+	if blrows != nil {
+		for blrows.Next() {
+			var typ, value, note string
+			var hits, autoAdded, enabled int64
+			blrows.Scan(&typ, &value, &note, &hits, &autoAdded, &enabled)
+			filterBL = append(filterBL, gin.H{
+				"type": typ, "value": value, "note": note,
+				"hits": hits, "auto_added": autoAdded, "enabled": enabled,
+			})
+		}
+		blrows.Close()
+	}
+	filterWL := []gin.H{}
+	wlrows, _ := db.DB.Query(`SELECT type,value,note,enabled FROM filter_whitelist ORDER BY id`)
+	if wlrows != nil {
+		for wlrows.Next() {
+			var typ, value, note string
+			var enabled int64
+			wlrows.Scan(&typ, &value, &note, &enabled)
+			filterWL = append(filterWL, gin.H{
+				"type": typ, "value": value, "note": note, "enabled": enabled,
+			})
+		}
+		wlrows.Close()
+	}
+
 	util.OK(c, gin.H{
-		"version":       version,
-		"generated_at":  time.Now().Format(time.RFC3339),
-		"nginx_configs": configs,
-		"rules":         rules,
+		"version":          version,
+		"generated_at":     time.Now().Format(time.RFC3339),
+		"nginx_configs":    configs,
+		"rules":            rules,
+		"filter_blacklist": filterBL,
+		"filter_whitelist": filterWL,
 	})
 }
 

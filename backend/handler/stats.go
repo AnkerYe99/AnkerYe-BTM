@@ -9,8 +9,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"nginxflow/db"
-	"nginxflow/util"
+	"ankerye-flow/db"
+	"ankerye-flow/util"
 )
 
 // RuleTraffic 返回各规则流量统计，period=today/7d/30d/all

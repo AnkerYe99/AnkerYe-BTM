@@ -12,16 +12,16 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"nginxflow/db"
-	"nginxflow/util"
+	"ankerye-flow/db"
+	"ankerye-flow/util"
 )
 
 const (
 	githubAPI   = "https://api.github.com"
 	githubRepo  = "AnkerYe99/AnkerYe-BTM"
 	giteaRepo   = "anker/AnkerYe-BTM"
-	binaryName  = "nginxflow-server"
-	installPath = "/opt/ankerye-btm/nginxflow-server"
+	binaryName  = "ankerye-flow-server"
+	installPath = "/opt/AnkerYe-BTM/ankerye-flow-server"
 )
 
 var updateHTTPClient = &http.Client{Timeout: 30 * time.Second}
@@ -139,7 +139,7 @@ sleep 2
 cp "%s" "%s"
 chmod +x "%s"
 rm -f "%s" "$0"
-systemctl restart ankerye-btm
+systemctl restart AnkerYe-BTM
 `, tmpPath, installPath, installPath, tmpPath)
 
 	scriptPath := "/tmp/ankerye-btm-do-update.sh"

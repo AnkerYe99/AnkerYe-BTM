@@ -51,7 +51,7 @@ func Load(path string) error {
 		Global.Server.JWTExpireHours = 24
 	}
 	if Global.Database.Path == "" {
-		Global.Database.Path = "/opt/nginxflow/data/nginxflow.db"
+		Global.Database.Path = "/opt/AnkerYe-BTM/data/ankerye-btm.db"
 	}
 	if Global.Nginx.ConfDir == "" {
 		Global.Nginx.ConfDir = "/etc/nginx/conf.d"
@@ -60,7 +60,7 @@ func Load(path string) error {
 		Global.Nginx.CertDir = "/etc/nginx/certs"
 	}
 	if Global.Nginx.LogDir == "" {
-		Global.Nginx.LogDir = "/var/log/nginxflow"
+		Global.Nginx.LogDir = "/var/log/AnkerYe-BTM"
 	}
 	if Global.Nginx.LogrotateDir == "" {
 		Global.Nginx.LogrotateDir = "/etc/logrotate.d"

@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"nginxflow/config"
-	"nginxflow/model"
+	"ankerye-flow/config"
+	"ankerye-flow/model"
 )
 
 func WriteLogrotate(r *model.Rule) error {
@@ -27,6 +27,6 @@ func WriteLogrotate(r *model.Rule) error {
     endscript
 }
 `, config.Global.Nginx.LogDir, r.ID, size)
-	path := filepath.Join(config.Global.Nginx.LogrotateDir, fmt.Sprintf("nginxflow-%d", r.ID))
+	path := filepath.Join(config.Global.Nginx.LogrotateDir, fmt.Sprintf("ankerye-flow-%d", r.ID))
 	return os.WriteFile(path, []byte(content), 0644)
 }

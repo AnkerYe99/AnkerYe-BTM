@@ -8,10 +8,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"nginxflow/db"
-	"nginxflow/engine"
-	"nginxflow/health"
-	"nginxflow/util"
+	"ankerye-flow/db"
+	"ankerye-flow/engine"
+	"ankerye-flow/health"
+	"ankerye-flow/util"
 )
 
 type ruleReq struct {

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"nginxflow/model"
+	"ankerye-flow/model"
 )
 
 type ProbeResult struct {

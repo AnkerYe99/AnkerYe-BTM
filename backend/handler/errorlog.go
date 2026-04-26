@@ -12,9 +12,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"nginxflow/config"
-	"nginxflow/db"
-	"nginxflow/util"
+	"ankerye-flow/config"
+	"ankerye-flow/db"
+	"ankerye-flow/util"
 )
 
 var reAccessLog = regexp.MustCompile(

@@ -6,9 +6,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 
-	"nginxflow/db"
-	"nginxflow/middleware"
-	"nginxflow/util"
+	"ankerye-flow/db"
+	"ankerye-flow/middleware"
+	"ankerye-flow/util"
 )
 
 func Login(c *gin.Context) {

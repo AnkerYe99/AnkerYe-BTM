@@ -194,10 +194,57 @@ var versionedMigrations = []struct {
 			created_at DATETIME DEFAULT (datetime('now','localtime'))
 		)`,
 	}},
-	// ── 未来迁移示例（按需追加，version 严格递增）──────────────
-	// {2, "add_rule_remark", []string{
-	//     `ALTER TABLE rules ADD COLUMN remark TEXT DEFAULT ''`,
-	// }},
+	{2, "add_filter_tables", []string{
+		`CREATE TABLE IF NOT EXISTS filter_blacklist (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			type       TEXT    NOT NULL CHECK(type IN ('ip','cidr','path','ua')),
+			value      TEXT    NOT NULL,
+			note       TEXT    DEFAULT '',
+			hits       INTEGER DEFAULT 0,
+			auto_added INTEGER DEFAULT 0,
+			enabled    INTEGER DEFAULT 1,
+			created_at DATETIME DEFAULT (datetime('now','localtime'))
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_filter_bl ON filter_blacklist(type,value)`,
+		`CREATE TABLE IF NOT EXISTS filter_whitelist (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			type       TEXT    NOT NULL CHECK(type IN ('ip','cidr')),
+			value      TEXT    NOT NULL,
+			note       TEXT    DEFAULT '',
+			enabled    INTEGER DEFAULT 1,
+			created_at DATETIME DEFAULT (datetime('now','localtime'))
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_filter_wl ON filter_whitelist(type,value)`,
+		`INSERT OR IGNORE INTO filter_blacklist(type,value,note) VALUES
+			('path','~*/wp-login.php','WordPress 登录爆破'),
+			('path','~*/.env','环境变量探测'),
+			('path','~*/.git/','Git 仓库探测'),
+			('path','~*/phpmyadmin','phpMyAdmin 探测'),
+			('path','~*/adminer','Adminer 探测'),
+			('path','~*/phpinfo','PHP 信息探测'),
+			('path','~*/shell.php','Webshell 探测'),
+			('path','~*/eval-stdin.php','PHP 代码注入'),
+			('path','~*/.aws/credentials','AWS 密钥探测'),
+			('path','~*/config.php','配置文件探测'),
+			('path','~*/backup.sql','备份文件探测'),
+			('path','~*/db.sql','数据库文件探测'),
+			('path','~*/xmlrpc.php','WordPress XML-RPC 攻击'),
+			('path','~*/actuator/env','Spring Boot 信息泄露')`,
+		`INSERT OR IGNORE INTO filter_blacklist(type,value,note) VALUES
+			('ua','~*sqlmap','SQLMap 注入扫描'),
+			('ua','~*nikto','Nikto 漏洞扫描'),
+			('ua','~*nmap','Nmap 端口扫描'),
+			('ua','~*masscan','Masscan 扫描'),
+			('ua','~*nuclei','Nuclei 漏洞利用'),
+			('ua','~*shodan','Shodan 爬虫'),
+			('ua','~*censys','Censys 扫描'),
+			('ua','~*zgrab','ZGrab 扫描'),
+			('ua','~*nessus','Nessus 漏洞扫描'),
+			('ua','~*acunetix','Acunetix 扫描'),
+			('ua','~*w3af','W3AF 扫描'),
+			('ua','~*burpsuite','Burp Suite 代理'),
+			('ua','~*dirsearch','Dirsearch 目录扫描')`,
+	}},
 }
 
 func migrate() error {

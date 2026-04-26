@@ -13,19 +13,19 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"nginxflow/config"
-	"nginxflow/db"
-	"nginxflow/engine"
-	"nginxflow/handler"
-	"nginxflow/health"
-	"nginxflow/middleware"
+	"ankerye-flow/config"
+	"ankerye-flow/db"
+	"ankerye-flow/engine"
+	"ankerye-flow/handler"
+	"ankerye-flow/health"
+	"ankerye-flow/middleware"
 )
 
 //go:embed all:frontend/dist
 var frontendFS embed.FS
 
 func main() {
-	cfgPath := flag.String("config", "/opt/nginxflow/config.yaml", "config file path")
+	cfgPath := flag.String("config", "/opt/AnkerYe-BTM/config.yaml", "config file path")
 	flag.Parse()
 
 	if err := config.Load(*cfgPath); err != nil {
@@ -41,12 +41,14 @@ func main() {
 		log.Printf("EnsureAdmin: %v", err)
 	}
 
+	engine.EnsureFilterConf()
 	if err := engine.ApplyAll(); err != nil {
 		log.Printf("[engine] ApplyAll warning: %v", err)
 	}
 	health.StartAll()
 	log.Println("[health] workers started")
 	engine.StartStatsWorker()
+	go engine.StartAutoBlockWorker()
 	go startCertAutoRenew()
 	go engine.StartSlaveSyncAgent()
 	go engine.StartSlaveRulesSyncAgent()
@@ -121,6 +123,19 @@ func main() {
 		auth.GET("/settings/backup", handler.Backup)
 		auth.POST("/settings/restore", handler.Restore)
 		auth.POST("/settings/test_email", handler.TestEmail)
+
+		// 黑白名单过滤
+		auth.GET("/filter/blacklist", handler.ListBlacklist)
+		auth.POST("/filter/blacklist", handler.AddBlacklist)
+		auth.DELETE("/filter/blacklist/:id", handler.DeleteBlacklist)
+		auth.POST("/filter/blacklist/:id/enable", handler.EnableBlacklist)
+		auth.POST("/filter/blacklist/:id/disable", handler.DisableBlacklist)
+		auth.GET("/filter/whitelist", handler.ListWhitelist)
+		auth.POST("/filter/whitelist", handler.AddWhitelist)
+		auth.DELETE("/filter/whitelist/:id", handler.DeleteWhitelist)
+		auth.POST("/filter/whitelist/:id/enable", handler.EnableWhitelist)
+		auth.POST("/filter/whitelist/:id/disable", handler.DisableWhitelist)
+		auth.POST("/filter/apply", handler.ApplyFilterNow)
 
 		auth.GET("/sync/nodes", handler.ListSyncNodes)
 		auth.POST("/sync/nodes", handler.AddSyncNode)

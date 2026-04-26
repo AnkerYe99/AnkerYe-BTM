@@ -1,4 +1,4 @@
-module nginxflow
+module ankerye-flow
 
 go 1.25.0
 

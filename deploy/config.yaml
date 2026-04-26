@@ -1,0 +1,23 @@
+server:
+  port: 9000
+  jwt_secret: change-me-in-production
+  jwt_expire_hours: 24
+
+database:
+  path: /opt/AnkerYe-BTM/data/ankerye-btm.db
+
+nginx:
+  conf_dir: /etc/nginx/conf.d
+  cert_dir: /etc/nginx/certs
+  log_dir: /var/log/AnkerYe-BTM
+  logrotate_dir: /etc/logrotate.d
+  reload_cmd: nginx -s reload
+  test_cmd: nginx -t
+
+health_check:
+  default_interval: 10
+  default_timeout: 3
+
+cert:
+  renew_before_days: 10
+  check_hour: 2

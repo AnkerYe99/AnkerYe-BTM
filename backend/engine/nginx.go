@@ -15,9 +15,9 @@ import (
 	"strings"
 	"syscall"
 
-	"nginxflow/config"
-	"nginxflow/db"
-	"nginxflow/model"
+	"ankerye-flow/config"
+	"ankerye-flow/db"
+	"ankerye-flow/model"
 )
 
 // formatBackend 给 upstream server 拼地址：IPv6 需要用中括号
@@ -125,8 +125,21 @@ func RenderRule(r *model.Rule) (string, error) {
 	return "", fmt.Errorf("unknown protocol: %s", r.Protocol)
 }
 
+func filterCheckBlock() string {
+	return `    # AnkerYe - Flow 全局过滤（白名单优先级高于黑名单）
+    set $__nf_block 0;
+    if ($__nf_bl_ip)   { set $__nf_block 1; }
+    if ($__nf_bl_path) { set $__nf_block 1; }
+    if ($__nf_bl_ua)   { set $__nf_block 1; }
+    if ($__nf_wl)      { set $__nf_block 0; }
+`
+}
+
 func proxyBlock(id int64) string {
 	return fmt.Sprintf(`    location / {
+        if ($__nf_block) {
+            return 444;
+        }
         proxy_pass http://nf_%d;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
@@ -166,9 +179,10 @@ func renderHTTP(r *model.Rule, servers []model.Server) string {
 		sb.WriteString("server {\n")
 		sb.WriteString(renderListen(r.ListenStack, r.ListenPort, ""))
 		sb.WriteString(fmt.Sprintf("    server_name %s;\n", sn))
-		sb.WriteString(fmt.Sprintf("    access_log %s/rule_%d_access.log nginxflow_http;\n", config.Global.Nginx.LogDir, r.ID))
+		sb.WriteString(fmt.Sprintf("    access_log %s/rule_%d_access.log ankerye_flow;\n", config.Global.Nginx.LogDir, r.ID))
 		sb.WriteString(fmt.Sprintf("    error_log  %s/rule_%d_error.log warn;\n", config.Global.Nginx.LogDir, r.ID))
 
+		sb.WriteString(filterCheckBlock())
 		if r.HTTPSEnabled == 1 && r.SSLRedirect == 1 && r.HTTPSPort != nil {
 			if *r.HTTPSPort == 443 {
 				sb.WriteString("    return 301 https://$host$request_uri;\n")
@@ -194,8 +208,9 @@ func renderHTTP(r *model.Rule, servers []model.Server) string {
 		sb.WriteString("    ssl_protocols TLSv1.2 TLSv1.3;\n")
 		sb.WriteString("    ssl_ciphers HIGH:!aNULL:!MD5;\n")
 		sb.WriteString("    ssl_session_cache shared:SSL:10m;\n")
-		sb.WriteString(fmt.Sprintf("    access_log %s/rule_%d_access.log nginxflow_http;\n", config.Global.Nginx.LogDir, r.ID))
+		sb.WriteString(fmt.Sprintf("    access_log %s/rule_%d_access.log ankerye_flow;\n", config.Global.Nginx.LogDir, r.ID))
 		sb.WriteString(fmt.Sprintf("    error_log  %s/rule_%d_error.log warn;\n", config.Global.Nginx.LogDir, r.ID))
+		sb.WriteString(filterCheckBlock())
 		sb.WriteString(proxyBlock(r.ID))
 		if r.CustomConfig != "" {
 			sb.WriteString("    " + r.CustomConfig + "\n")
@@ -401,7 +416,7 @@ func PreviewRule(ruleID int64) (string, error) {
 func DeleteRule(ruleID int64) error {
 	removeRuleFiles(ruleID, "http")
 	removeRuleFiles(ruleID, "tcp")
-	os.Remove(filepath.Join(config.Global.Nginx.LogrotateDir, fmt.Sprintf("nginxflow-%d", ruleID)))
+	os.Remove(filepath.Join(config.Global.Nginx.LogrotateDir, fmt.Sprintf("ankerye-flow-%d", ruleID)))
 	logs, _ := filepath.Glob(filepath.Join(config.Global.Nginx.LogDir, fmt.Sprintf("rule_%d_*", ruleID)))
 	for _, l := range logs {
 		os.Remove(l)

@@ -7,8 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 
-	"nginxflow/config"
-	"nginxflow/util"
+	"ankerye-flow/config"
+	"ankerye-flow/util"
 )
 
 type Claims struct {

@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"nginxflow/config"
-	"nginxflow/db"
+	"ankerye-flow/config"
+	"ankerye-flow/db"
 )
 
 var (

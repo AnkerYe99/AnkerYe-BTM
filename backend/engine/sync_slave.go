@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"nginxflow/config"
-	"nginxflow/db"
+	"ankerye-flow/config"
+	"ankerye-flow/db"
 )
 
 // 强制触发同步通道（缓冲1，防止堆积）

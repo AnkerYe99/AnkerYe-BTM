@@ -1,12 +1,12 @@
 [Unit]
-Description=AnkerYe - Flow API Server
+Description=AnkerYe - 流量管理
 After=network.target nginx.service
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/nginxflow
-ExecStart=/opt/nginxflow/nginxflow-server -config /opt/nginxflow/config.yaml
+WorkingDirectory=/opt/AnkerYe-BTM
+ExecStart=/opt/AnkerYe-BTM/ankerye-flow-server -config /opt/AnkerYe-BTM/config.yaml
 Restart=on-failure
 RestartSec=5
 Environment=TZ=Asia/Shanghai
