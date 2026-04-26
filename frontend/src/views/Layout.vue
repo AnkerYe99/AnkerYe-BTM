@@ -15,7 +15,7 @@
         <el-menu-item index="/certs"><el-icon><Lock/></el-icon><span>SSL证书</span></el-menu-item>
         <el-menu-item index="/traffic"><el-icon><TrendCharts/></el-icon><span>流量统计</span></el-menu-item>
         <el-menu-item index="/errorlogs"><el-icon><Warning/></el-icon><span>出错日志</span></el-menu-item>
-        <el-menu-item index="/filter"><el-icon><Shield/></el-icon><span>黑白名单</span></el-menu-item>
+        <el-menu-item index="/filter"><el-icon><Filter/></el-icon><span>黑白名单</span></el-menu-item>
         <el-menu-item index="/sync"><el-icon><Share/></el-icon><span>从节点</span></el-menu-item>
         <el-menu-item index="/settings"><el-icon><Setting/></el-icon><span>系统设置</span></el-menu-item>
       </el-menu>
