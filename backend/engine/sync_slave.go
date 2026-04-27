@@ -401,6 +401,10 @@ func pullAndApplyCerts(masterURL, token string) error {
 		db.DB.Exec("DELETE FROM ssl_certs WHERE domain NOT IN ("+placeholders+")", masterDomains...)
 	}
 
+	if err := Reload(); err != nil {
+		log.Printf("[slave-certs] nginx 重载失败: %v", err)
+	}
+
 	lastCertsVersion = newVersion
 	setSyncStatus("slave_certs", "ok", fmt.Sprintf("同步完成，证书 %d 个", masterCount))
 	log.Printf("[slave-certs] 同步完成，证书 %d 个（主节点版本 %s）", masterCount, shortV(newVersion))
