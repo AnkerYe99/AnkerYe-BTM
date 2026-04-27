@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -20,9 +21,17 @@ const (
 	githubAPI   = "https://api.github.com"
 	githubRepo  = "AnkerYe99/AnkerYe-BTM"
 	giteaRepo   = "anker/AnkerYe-BTM"
-	binaryName  = "ankerye-flow-server"
 	installPath = "/opt/AnkerYe-BTM/ankerye-flow-server"
 )
+
+func binaryName() string {
+	switch runtime.GOARCH {
+	case "arm64":
+		return "ankerye-flow-server-arm64"
+	default:
+		return "ankerye-flow-server-amd64"
+	}
+}
 
 var updateHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
@@ -80,8 +89,9 @@ func fetchRelease(apiBase, repo string) (*releaseInfo, error) {
 }
 
 func assetURL(r *releaseInfo) string {
+	name := binaryName()
 	for _, a := range r.Assets {
-		if a.Name == binaryName {
+		if a.Name == name {
 			return a.BrowserDownloadURL
 		}
 	}
@@ -98,7 +108,7 @@ func CheckUpdate(c *gin.Context) {
 	}
 	dl := assetURL(r)
 	if dl == "" {
-		util.Fail(c, 400, "Release 中未找到 "+binaryName+" 二进制，请先上传构建产物")
+		util.Fail(c, 400, "Release 中未找到 "+binaryName()+" 二进制，请先上传构建产物")
 		return
 	}
 
@@ -122,7 +132,7 @@ func ApplyUpdate(c *gin.Context) {
 	}
 	dl := assetURL(r)
 	if dl == "" {
-		util.Fail(c, 400, "Release 中未找到 "+binaryName+" 二进制")
+		util.Fail(c, 400, "Release 中未找到 "+binaryName()+" 二进制")
 		return
 	}
 

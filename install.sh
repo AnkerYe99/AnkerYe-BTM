@@ -209,7 +209,7 @@ http {
     sendfile      on;
     keepalive_timeout 65;
     client_max_body_size 64m;
-    log_format ankerye_btm '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+    log_format ankerye_flow '\$remote_addr - \$remote_user [\$time_local] "\$request" '
                             '\$status \$body_bytes_sent "\$http_referer" "\$http_user_agent" \$upstream_addr';
     include /etc/nginx/conf.d/*-http.conf;
 }

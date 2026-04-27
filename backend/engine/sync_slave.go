@@ -23,7 +23,7 @@ var rulesForceSync = make(chan struct{}, 1)
 var certsForceSync = make(chan struct{}, 1)
 var filterForceSync = make(chan struct{}, 1)
 
-var syncHTTPClient = &http.Client{Timeout: 30 * time.Second}
+var syncHTTPClient = &http.Client{Timeout: 120 * time.Second}
 
 func TriggerRulesSync() {
 	select {

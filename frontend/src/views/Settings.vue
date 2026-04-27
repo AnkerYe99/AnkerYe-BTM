@@ -585,6 +585,17 @@ function nowStr() {
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
+// 轮询直到状态不再是 syncing，最多 30 秒
+function pollUntilDone(statusKey, maxMs = 30000) {
+  const start = Date.now()
+  const check = async () => {
+    await load()
+    if (form.value[statusKey] === 'syncing' && Date.now() - start < maxMs)
+      setTimeout(check, 3000)
+  }
+  setTimeout(check, 3000)
+}
+
 async function triggerRules() {
   if (!form.value.slave_rules_url) { ElMessage.warning('请先设置主节点地址'); return }
   triggeringRules.value = true
@@ -593,7 +604,7 @@ async function triggerRules() {
   form.value.slave_rules_last_msg = '同步中，请稍等...'
   try {
     await api.post('/sync/trigger_rules')
-    setTimeout(load, 4000)
+    pollUntilDone('slave_rules_last_status')
   } catch (e) { ElMessage.error('触发失败') }
   triggeringRules.value = false
 }
@@ -606,7 +617,7 @@ async function triggerCerts() {
   form.value.slave_certs_last_msg = '同步中，请稍等...'
   try {
     await api.post('/sync/trigger_certs')
-    setTimeout(load, 4000)
+    pollUntilDone('slave_certs_last_status')
   } catch (e) { ElMessage.error('触发失败') }
   triggeringCerts.value = false
 }
@@ -629,7 +640,7 @@ async function triggerFilter() {
   form.value.slave_filter_last_msg = '同步中，请稍等...'
   try {
     await api.post('/sync/trigger_filter')
-    setTimeout(load, 4000)
+    pollUntilDone('slave_filter_last_status')
   } catch (e) { ElMessage.error('触发失败') }
   triggeringFilter.value = false
 }
