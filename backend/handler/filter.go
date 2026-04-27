@@ -71,21 +71,26 @@ func AddBlacklist(c *gin.Context) {
 
 func DeleteBlacklist(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	var typ, value string
+	db.DB.QueryRow(`SELECT type,value FROM filter_blacklist WHERE id=?`, id).Scan(&typ, &value)
 	db.DB.Exec(`DELETE FROM filter_blacklist WHERE id=?`, id)
+	if typ != "" {
+		db.DB.Exec(`INSERT INTO sync_tombstones(table_name,record_key) VALUES('filter_blacklist',?)`, typ+":"+value)
+	}
 	engine.ApplyFilter()
 	util.OK(c, gin.H{"id": id})
 }
 
 func EnableBlacklist(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
-	db.DB.Exec(`UPDATE filter_blacklist SET enabled=1 WHERE id=?`, id)
+	db.DB.Exec(`UPDATE filter_blacklist SET enabled=1,updated_at=datetime('now','localtime') WHERE id=?`, id)
 	engine.ApplyFilter()
 	util.OK(c, gin.H{"id": id})
 }
 
 func DisableBlacklist(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
-	db.DB.Exec(`UPDATE filter_blacklist SET enabled=0 WHERE id=?`, id)
+	db.DB.Exec(`UPDATE filter_blacklist SET enabled=0,updated_at=datetime('now','localtime') WHERE id=?`, id)
 	engine.ApplyFilter()
 	util.OK(c, gin.H{"id": id})
 }
@@ -146,21 +151,26 @@ func AddWhitelist(c *gin.Context) {
 
 func DeleteWhitelist(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	var typ, value string
+	db.DB.QueryRow(`SELECT type,value FROM filter_whitelist WHERE id=?`, id).Scan(&typ, &value)
 	db.DB.Exec(`DELETE FROM filter_whitelist WHERE id=?`, id)
+	if typ != "" {
+		db.DB.Exec(`INSERT INTO sync_tombstones(table_name,record_key) VALUES('filter_whitelist',?)`, typ+":"+value)
+	}
 	engine.ApplyFilter()
 	util.OK(c, gin.H{"id": id})
 }
 
 func EnableWhitelist(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
-	db.DB.Exec(`UPDATE filter_whitelist SET enabled=1 WHERE id=?`, id)
+	db.DB.Exec(`UPDATE filter_whitelist SET enabled=1,updated_at=datetime('now','localtime') WHERE id=?`, id)
 	engine.ApplyFilter()
 	util.OK(c, gin.H{"id": id})
 }
 
 func DisableWhitelist(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
-	db.DB.Exec(`UPDATE filter_whitelist SET enabled=0 WHERE id=?`, id)
+	db.DB.Exec(`UPDATE filter_whitelist SET enabled=0,updated_at=datetime('now','localtime') WHERE id=?`, id)
 	engine.ApplyFilter()
 	util.OK(c, gin.H{"id": id})
 }

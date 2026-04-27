@@ -269,6 +269,35 @@ var versionedMigrations = []struct {
 			('method','CONNECT','代理穿透尝试'),
 			('method','TRACE','HTTP TRACE 方法，可用于 XST 攻击')`,
 	}},
+	{4, "sync_incremental", []string{
+		// 修复 sync_nodes 重复行：保留每个 address 中 id 最小的那一条
+		`DELETE FROM sync_nodes WHERE id NOT IN (
+			SELECT MIN(id) FROM sync_nodes GROUP BY address
+		)`,
+		// 添加 UNIQUE 约束，后续 ON CONFLICT(address) 才能正确 upsert
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_nodes_addr ON sync_nodes(address)`,
+		// 每种数据类型独立记录最后同步时间，主节点 UI 可按类型显示从节点状态
+		`ALTER TABLE sync_nodes ADD COLUMN last_rules_sync_at DATETIME DEFAULT NULL`,
+		`ALTER TABLE sync_nodes ADD COLUMN last_certs_sync_at DATETIME DEFAULT NULL`,
+		`ALTER TABLE sync_nodes ADD COLUMN last_filter_sync_at DATETIME DEFAULT NULL`,
+		// 过滤表加 updated_at，支持增量同步（与 rules/ssl_certs 保持一致）
+		`ALTER TABLE filter_blacklist ADD COLUMN updated_at DATETIME DEFAULT (datetime('now','localtime'))`,
+		`ALTER TABLE filter_whitelist ADD COLUMN updated_at DATETIME DEFAULT (datetime('now','localtime'))`,
+		// tombstone 表：记录主节点删除事件，供从节点增量同步时清理本地数据
+		`CREATE TABLE IF NOT EXISTS sync_tombstones (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			table_name TEXT    NOT NULL,
+			record_key TEXT    NOT NULL,
+			deleted_at DATETIME DEFAULT (datetime('now','localtime'))
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_tombstones ON sync_tombstones(table_name, deleted_at)`,
+		// 自动清理 30 天以上的 tombstone
+		`CREATE TRIGGER IF NOT EXISTS trim_tombstones AFTER INSERT ON sync_tombstones
+			BEGIN
+				DELETE FROM sync_tombstones
+				WHERE deleted_at < datetime('now', '-30 days', 'localtime');
+			END`,
+	}},
 }
 
 func migrate() error {

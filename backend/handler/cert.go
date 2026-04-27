@@ -131,7 +131,13 @@ func DeleteCert(c *gin.Context) {
 		util.Fail(c, 400, "证书被规则占用，无法删除")
 		return
 	}
+	// 先读出 domain，再写 tombstone，保证从节点增量同步能清理该证书
+	var domain string
+	db.DB.QueryRow(`SELECT domain FROM ssl_certs WHERE id=?`, id).Scan(&domain)
 	db.DB.Exec(`DELETE FROM ssl_certs WHERE id=?`, id)
+	if domain != "" {
+		db.DB.Exec(`INSERT INTO sync_tombstones(table_name,record_key) VALUES('ssl_certs',?)`, domain)
+	}
 	util.OK(c, nil)
 }
 

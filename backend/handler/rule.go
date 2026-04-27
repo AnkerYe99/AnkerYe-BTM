@@ -247,6 +247,8 @@ func DeleteRule(c *gin.Context) {
 	health.StopRule(id)
 	engine.DeleteRule(id)
 	db.DB.Exec(`DELETE FROM rules WHERE id=?`, id)
+	// tombstone 供从节点增量同步时删除对应规则
+	db.DB.Exec(`INSERT INTO sync_tombstones(table_name,record_key) VALUES('rules',?)`, strconv.FormatInt(id, 10))
 	util.OK(c, gin.H{"deleted": id})
 }
 
