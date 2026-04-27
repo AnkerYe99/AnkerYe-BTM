@@ -54,8 +54,12 @@ echo "  ────────────────────────
 # ── 系统检查 ────────────────────────────────────────────────
 step "检查系统环境"
 command -v apt-get &>/dev/null || error "目前仅支持 Debian/Ubuntu 系统"
+export DEBIAN_FRONTEND=noninteractive
 for pkg in curl python3; do
-  command -v $pkg &>/dev/null || { apt-get update -qq; apt-get install -y $pkg; }
+  if ! command -v $pkg &>/dev/null; then
+    info "安装 $pkg..."
+    apt-get update -y && apt-get install -y $pkg
+  fi
 done
 info "系统: $(lsb_release -ds 2>/dev/null || uname -sr)"
 
@@ -126,9 +130,10 @@ step "检查 Nginx"
 if command -v nginx &>/dev/null; then
   info "Nginx 已安装: $(nginx -v 2>&1)"
 else
-  apt-get update -qq
-  apt-get install -y nginx
-  info "Nginx 安装完成"
+  info "Nginx 未安装，正在安装（可能需要1-2分钟）..."
+  apt-get update -y
+  apt-get install -y --no-install-recommends nginx
+  info "Nginx 安装完成: $(nginx -v 2>&1)"
 fi
 
 # ── 停止旧服务 ──────────────────────────────────────────────
