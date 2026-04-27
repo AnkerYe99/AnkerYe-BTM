@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus'
 
 const api = axios.create({
   baseURL: '/api/v1',
-  timeout: 15000
+  timeout: 60000
 })
 
 // 每次请求更新活跃时间，用于无操作自动退出

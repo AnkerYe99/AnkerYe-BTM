@@ -69,6 +69,7 @@ func main() {
 	r.GET("/api/v1/sync/export", handler.SyncExport)
 	r.GET("/api/v1/sync/rules_export", handler.SyncRulesExport)
 	r.GET("/api/v1/sync/certs_export", handler.SyncCertsExport)
+	r.GET("/api/v1/sync/filter_export", handler.SyncFilterExport)
 	r.GET("/api/v1/test", func(c *gin.Context) {
 		c.JSON(200, gin.H{"code": 0, "msg": "ok", "service": "ankerye-流量管理"})
 	})
@@ -146,7 +147,6 @@ func main() {
 		auth.POST("/sync/trigger_rules", handler.TriggerRulesSync)
 		auth.POST("/sync/trigger_certs", handler.TriggerCertsSync)
 		auth.POST("/sync/trigger_filter", handler.TriggerFilterSync)
-		r.GET("/api/v1/sync/filter_export", handler.SyncFilterExport)
 	}
 
 	// 前端静态文件（SPA 模式，未匹配路由回退 index.html）

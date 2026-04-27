@@ -71,10 +71,9 @@ func GetSettings(c *gin.Context) {
 	for rows.Next() {
 		var k, v string
 		rows.Scan(&k, &v)
-		// 敏感字段仅返回是否已配置
-		if k == "tencent_secret_key" || k == "sync_token" || k == "sync_rules_token" || k == "sync_certs_token" ||
-			k == "smtp_password" || k == "dnspod_key" || k == "acme_account_key" || k == "acme_account_json" ||
-			k == "slave_sync_token" || k == "slave_rules_token" || k == "slave_certs_token" {
+		// 敏感字段仅返回是否已配置（同步 token 不再遮掩）
+		if k == "tencent_secret_key" || k == "smtp_password" || k == "dnspod_key" ||
+			k == "acme_account_key" || k == "acme_account_json" {
 			if v != "" {
 				m[k] = "***"
 			} else {
@@ -99,6 +98,12 @@ func UpdateSettings(c *gin.Context) {
 			continue
 		}
 		db.DB.Exec(`INSERT INTO system_settings(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, k, v)
+		// 修改主同步 token 时，清空各类型独立 token 让验证统一走 sync_token
+		if k == "sync_token" {
+			for _, sub := range []string{"sync_rules_token", "sync_certs_token", "sync_filter_token"} {
+				db.DB.Exec(`INSERT INTO system_settings(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, sub, "")
+			}
+		}
 	}
 	util.OK(c, nil)
 }

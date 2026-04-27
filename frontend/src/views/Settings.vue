@@ -9,6 +9,17 @@
       <el-tab-pane label="Nginx 参数" name="nginx">
         <el-card shadow="never" class="section-card">
           <template #header>
+            <span class="card-title">基本设置</span>
+          </template>
+          <el-form :model="form" label-width="150px" class="section-form">
+            <el-form-item label="平台名称">
+              <el-input v-model="form.site_title" placeholder="AnkerYe - 流量管理平台" style="max-width:360px" clearable />
+              <div class="field-hint">显示在浏览器标签页和侧边栏顶部，留空恢复默认名称</div>
+            </el-form-item>
+          </el-form>
+        </el-card>
+        <el-card shadow="never" class="section-card">
+          <template #header>
             <span class="card-title">全局参数</span>
             <span class="card-subtitle">调整 nginx 进程与连接相关设置，修改后需重载生效</span>
           </template>
@@ -184,124 +195,158 @@
 
       <!-- ── 主从同步 ── -->
       <el-tab-pane label="主从同步" name="sync">
-        <div class="two-col">
-          <!-- 规则同步 -->
-          <el-card shadow="never" class="section-card sync-card">
-            <template #header>
-              <span class="card-title">规则同步</span>
-            </template>
-            <div class="sync-card-body">
-              <div class="sub-section">
-                <div class="sub-section-title">作为主节点</div>
-                <el-form-item label="同步 Token" label-width="90px">
-                  <el-input v-model="form.sync_rules_token" type="password" show-password
-                    placeholder="设置后从节点可拉取本机规则" />
-                  <el-button style="margin-top:8px;width:100%" @click="genRulesToken">生成 Token</el-button>
-                </el-form-item>
+        <!-- 同步 Token 设置（主节点） -->
+        <el-card shadow="never" class="section-card">
+          <template #header>
+            <span class="card-title">同步 Token</span>
+            <span class="card-subtitle">作为主节点时，从节点使用此 Token 拉取本机数据</span>
+          </template>
+          <div style="max-width:520px;padding:4px 0">
+            <el-form-item label="同步 Token" label-width="100px">
+              <div style="display:flex;gap:8px;width:100%">
+                <el-input v-model="form.sync_token"
+                  placeholder="设置后从节点凭此 Token 拉取数据" style="flex:1" />
+                <el-button @click="genToken">生成</el-button>
               </div>
-              <div class="sub-section">
-                <div class="sub-section-title">作为从节点 <span class="sub-hint">（留空不启用）</span></div>
-                <el-form-item label="主节点地址" label-width="90px">
-                  <el-input v-model="form.slave_rules_url" placeholder="http://10.x.x.x:9000" />
-                </el-form-item>
-                <el-form-item label="主节点 Token" label-width="90px">
-                  <el-input v-model="form.slave_rules_token" type="password" show-password placeholder="未修改留空" />
-                </el-form-item>
-                <el-form-item label="同步间隔" label-width="90px">
-                  <el-input-number v-model.number="form.slave_rules_interval" :min="10" :max="3600" style="width:120px" />
-                  <span style="margin-left:8px;color:#909399;font-size:13px">秒/次</span>
-                </el-form-item>
-              </div>
-              <el-button type="primary" plain :loading="triggeringRules" @click="triggerRules" style="width:100%">立即同步规则</el-button>
-              <div v-if="form.slave_rules_last_sync_at" class="sync-status" style="margin-top:10px">
-                <el-tag :type="form.slave_rules_last_status==='ok'?'success':'danger'" size="small">
-                  {{ form.slave_rules_last_status==='ok' ? '正常' : '异常' }}
-                </el-tag>
-                <span style="margin-left:8px;color:#909399;font-size:12px;word-break:break-all">
-                  {{ form.slave_rules_last_sync_at }}<br>{{ form.slave_rules_last_msg }}
-                </span>
-              </div>
-            </div>
-          </el-card>
+              <div class="field-hint">所有同步类型共用同一个 Token，从节点填入对应主节点地址和此 Token 即可</div>
+            </el-form-item>
+          </div>
+        </el-card>
 
-          <!-- 证书同步 -->
-          <el-card shadow="never" class="section-card sync-card">
-            <template #header>
-              <span class="card-title">证书同步</span>
-            </template>
-            <div class="sync-card-body">
-              <div class="sub-section">
-                <div class="sub-section-title">作为主节点</div>
-                <el-form-item label="同步 Token" label-width="90px">
-                  <el-input v-model="form.sync_certs_token" type="password" show-password
-                    placeholder="设置后从节点可拉取本机证书" />
-                  <el-button style="margin-top:8px;width:100%" @click="genCertsToken">生成 Token</el-button>
-                </el-form-item>
-              </div>
-              <div class="sub-section">
-                <div class="sub-section-title">作为从节点 <span class="sub-hint">（留空不启用）</span></div>
-                <el-form-item label="主节点地址" label-width="90px">
-                  <el-input v-model="form.slave_certs_url" placeholder="http://10.x.x.x:9000" />
-                </el-form-item>
-                <el-form-item label="主节点 Token" label-width="90px">
-                  <el-input v-model="form.slave_certs_token" type="password" show-password placeholder="未修改留空" />
-                </el-form-item>
-                <el-form-item label="同步间隔" label-width="90px">
-                  <el-input-number v-model.number="form.slave_certs_interval" :min="10" :max="3600" style="width:120px" />
-                  <span style="margin-left:8px;color:#909399;font-size:13px">秒/次</span>
-                </el-form-item>
-              </div>
-              <el-button type="primary" plain :loading="triggeringCerts" @click="triggerCerts" style="width:100%">立即同步证书</el-button>
-              <div v-if="form.slave_certs_last_sync_at" class="sync-status" style="margin-top:10px">
-                <el-tag :type="form.slave_certs_last_status==='ok'?'success':'danger'" size="small">
-                  {{ form.slave_certs_last_status==='ok' ? '正常' : '异常' }}
-                </el-tag>
-                <span style="margin-left:8px;color:#909399;font-size:12px;word-break:break-all">
-                  {{ form.slave_certs_last_sync_at }}<br>{{ form.slave_certs_last_msg }}
-                </span>
-              </div>
-            </div>
-          </el-card>
+        <!-- 从节点设置 -->
+        <el-card shadow="never" class="section-card" style="margin-top:16px">
+          <template #header>
+            <span class="card-title">从节点设置</span>
+            <span class="card-subtitle">配置本机从哪些主节点拉取数据，可独立开关每种同步类型</span>
+          </template>
+          <div class="slave-sync-list">
 
-          <!-- 黑名单同步 -->
-          <el-card shadow="never" class="section-card sync-card" style="margin-top:16px">
-            <template #header>
-              <span class="card-title">黑名单同步</span>
-            </template>
-            <div class="sync-card-body">
-              <div class="sub-section">
-                <div class="sub-section-title">作为主节点</div>
-                <el-form-item label="同步 Token" label-width="90px">
-                  <el-input v-model="form.sync_filter_token" type="password" show-password
-                    placeholder="设置后从节点可拉取本机黑白名单" />
-                  <el-button style="margin-top:8px;width:100%" @click="genFilterToken">生成 Token</el-button>
-                </el-form-item>
+            <!-- 规则同步 -->
+            <div class="slave-sync-item">
+              <div class="slave-sync-header">
+                <div class="slave-sync-label">
+                  <el-icon style="color:#409EFF"><Connection /></el-icon>
+                  <span>规则同步</span>
+                </div>
+                <el-switch v-model="form.slave_rules_enabled" active-value="1" inactive-value="0"
+                  active-text="开启" inactive-text="关闭" />
               </div>
-              <div class="sub-section">
-                <div class="sub-section-title">作为从节点 <span class="sub-hint">（留空不启用）</span></div>
-                <el-form-item label="主节点地址" label-width="90px">
-                  <el-input v-model="form.slave_filter_url" placeholder="http://10.x.x.x:9000" />
-                </el-form-item>
-                <el-form-item label="主节点 Token" label-width="90px">
-                  <el-input v-model="form.slave_filter_token" type="password" show-password placeholder="未修改留空" />
-                </el-form-item>
-                <el-form-item label="同步时间" label-width="90px">
-                  <el-input v-model="form.slave_filter_time" placeholder="03:00" style="width:120px" />
-                  <span style="margin-left:8px;color:#909399;font-size:13px">每天定时（HH:MM）</span>
-                </el-form-item>
-              </div>
-              <el-button type="primary" plain :loading="triggeringFilter" @click="triggerFilter" style="width:100%">立即同步黑名单</el-button>
-              <div v-if="form.slave_filter_last_sync_at" class="sync-status" style="margin-top:10px">
-                <el-tag :type="form.slave_filter_last_status==='ok'?'success':'danger'" size="small">
-                  {{ form.slave_filter_last_status==='ok' ? '正常' : '异常' }}
-                </el-tag>
-                <span style="margin-left:8px;color:#909399;font-size:12px;word-break:break-all">
-                  {{ form.slave_filter_last_sync_at }}<br>{{ form.slave_filter_last_msg }}
-                </span>
+              <div class="slave-sync-body" :class="{ 'slave-sync-disabled': form.slave_rules_enabled === '0' }">
+                <el-form :model="form" label-width="90px" size="small">
+                  <el-form-item label="主节点地址">
+                    <el-input v-model="form.slave_rules_url" placeholder="http://主节点IP:端口"
+                      :disabled="form.slave_rules_enabled === '0'" />
+                  </el-form-item>
+                  <el-form-item label="主节点 Token">
+                    <el-input v-model="form.slave_rules_token"
+                      placeholder="主节点同步 Token" :disabled="form.slave_rules_enabled === '0'" />
+                  </el-form-item>
+                  <el-form-item label="同步间隔">
+                    <el-input-number v-model.number="form.slave_rules_interval" :min="10" :max="3600"
+                      style="width:120px" :disabled="form.slave_rules_enabled === '0'" />
+                    <span style="margin-left:8px;color:#909399;font-size:13px">秒/次</span>
+                  </el-form-item>
+                </el-form>
+                <div class="slave-sync-actions">
+                  <el-button size="small" type="primary" plain :loading="triggeringRules"
+                    :disabled="form.slave_rules_enabled === '0'" @click="triggerRules">立即同步</el-button>
+                  <div v-if="form.slave_rules_last_sync_at" class="sync-inline-status">
+                    <el-tag :type="form.slave_rules_last_status==='ok'?'success':form.slave_rules_last_status==='syncing'?'warning':'danger'" size="small" effect="plain">
+                      {{ form.slave_rules_last_status==='ok'?'正常':form.slave_rules_last_status==='syncing'?'同步中':'异常' }}
+                    </el-tag>
+                    <span style="color:#909399;font-size:12px">{{ form.slave_rules_last_sync_at }}</span>
+                    <span v-if="form.slave_rules_last_msg" style="color:#606266;font-size:12px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ form.slave_rules_last_msg }}</span>
+                  </div>
+                </div>
               </div>
             </div>
-          </el-card>
-        </div>
+
+            <el-divider />
+
+            <!-- 证书同步 -->
+            <div class="slave-sync-item">
+              <div class="slave-sync-header">
+                <div class="slave-sync-label">
+                  <el-icon style="color:#67C23A"><Lock /></el-icon>
+                  <span>证书同步</span>
+                </div>
+                <el-switch v-model="form.slave_certs_enabled" active-value="1" inactive-value="0"
+                  active-text="开启" inactive-text="关闭" />
+              </div>
+              <div class="slave-sync-body" :class="{ 'slave-sync-disabled': form.slave_certs_enabled === '0' }">
+                <el-form :model="form" label-width="90px" size="small">
+                  <el-form-item label="主节点地址">
+                    <el-input v-model="form.slave_certs_url" placeholder="http://主节点IP:端口"
+                      :disabled="form.slave_certs_enabled === '0'" />
+                  </el-form-item>
+                  <el-form-item label="主节点 Token">
+                    <el-input v-model="form.slave_certs_token"
+                      placeholder="主节点同步 Token" :disabled="form.slave_certs_enabled === '0'" />
+                  </el-form-item>
+                  <el-form-item label="同步间隔">
+                    <el-input-number v-model.number="form.slave_certs_interval" :min="10" :max="3600"
+                      style="width:120px" :disabled="form.slave_certs_enabled === '0'" />
+                    <span style="margin-left:8px;color:#909399;font-size:13px">秒/次</span>
+                  </el-form-item>
+                </el-form>
+                <div class="slave-sync-actions">
+                  <el-button size="small" type="primary" plain :loading="triggeringCerts"
+                    :disabled="form.slave_certs_enabled === '0'" @click="triggerCerts">立即同步</el-button>
+                  <div v-if="form.slave_certs_last_sync_at" class="sync-inline-status">
+                    <el-tag :type="form.slave_certs_last_status==='ok'?'success':form.slave_certs_last_status==='syncing'?'warning':'danger'" size="small" effect="plain">
+                      {{ form.slave_certs_last_status==='ok'?'正常':form.slave_certs_last_status==='syncing'?'同步中':'异常' }}
+                    </el-tag>
+                    <span style="color:#909399;font-size:12px">{{ form.slave_certs_last_sync_at }}</span>
+                    <span v-if="form.slave_certs_last_msg" style="color:#606266;font-size:12px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ form.slave_certs_last_msg }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <el-divider />
+
+            <!-- 黑白名单同步 -->
+            <div class="slave-sync-item">
+              <div class="slave-sync-header">
+                <div class="slave-sync-label">
+                  <el-icon style="color:#E6A23C"><Filter /></el-icon>
+                  <span>黑白名单同步</span>
+                </div>
+                <el-switch v-model="form.slave_filter_enabled" active-value="1" inactive-value="0"
+                  active-text="开启" inactive-text="关闭" />
+              </div>
+              <div class="slave-sync-body" :class="{ 'slave-sync-disabled': form.slave_filter_enabled === '0' }">
+                <el-form :model="form" label-width="90px" size="small">
+                  <el-form-item label="主节点地址">
+                    <el-input v-model="form.slave_filter_url" placeholder="http://主节点IP:端口"
+                      :disabled="form.slave_filter_enabled === '0'" />
+                  </el-form-item>
+                  <el-form-item label="主节点 Token">
+                    <el-input v-model="form.slave_filter_token"
+                      placeholder="主节点同步 Token" :disabled="form.slave_filter_enabled === '0'" />
+                  </el-form-item>
+                  <el-form-item label="同步时间">
+                    <el-input v-model="form.slave_filter_time" placeholder="03:00" style="width:120px"
+                      :disabled="form.slave_filter_enabled === '0'" />
+                    <span style="margin-left:8px;color:#909399;font-size:13px">每天定时（HH:MM）</span>
+                  </el-form-item>
+                </el-form>
+                <div class="slave-sync-actions">
+                  <el-button size="small" type="primary" plain :loading="triggeringFilter"
+                    :disabled="form.slave_filter_enabled === '0'" @click="triggerFilter">立即同步</el-button>
+                  <div v-if="form.slave_filter_last_sync_at" class="sync-inline-status">
+                    <el-tag :type="form.slave_filter_last_status==='ok'?'success':form.slave_filter_last_status==='syncing'?'warning':'danger'" size="small" effect="plain">
+                      {{ form.slave_filter_last_status==='ok'?'正常':form.slave_filter_last_status==='syncing'?'同步中':'异常' }}
+                    </el-tag>
+                    <span style="color:#909399;font-size:12px">{{ form.slave_filter_last_sync_at }}</span>
+                    <span v-if="form.slave_filter_last_msg" style="color:#606266;font-size:12px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ form.slave_filter_last_msg }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </el-card>
       </el-tab-pane>
 
       <!-- ── 数据管理 ── -->
@@ -471,6 +516,10 @@ async function save() {
   }
   await api.put('/settings', data)
   ElMessage.success('设置已保存')
+  // 同步更新页面标题
+  const title = data.site_title || 'AnkerYe - 流量管理平台'
+  document.title = title
+  localStorage.setItem('site_title', title)
   load()
 }
 
@@ -531,12 +580,19 @@ async function restore(e) {
   } catch (e) { ElMessage.error(e?.response?.data?.msg || '恢复失败，请检查备份文件') }
 }
 
+function nowStr() {
+  const d = new Date(), p = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
 async function triggerRules() {
   if (!form.value.slave_rules_url) { ElMessage.warning('请先设置主节点地址'); return }
   triggeringRules.value = true
+  form.value.slave_rules_last_sync_at = nowStr()
+  form.value.slave_rules_last_status = 'syncing'
+  form.value.slave_rules_last_msg = '同步中，请稍等...'
   try {
     await api.post('/sync/trigger_rules')
-    ElMessage.success('已触发规则同步，约3秒后刷新状态')
     setTimeout(load, 4000)
   } catch (e) { ElMessage.error('触发失败') }
   triggeringRules.value = false
@@ -545,9 +601,11 @@ async function triggerRules() {
 async function triggerCerts() {
   if (!form.value.slave_certs_url) { ElMessage.warning('请先设置主节点地址'); return }
   triggeringCerts.value = true
+  form.value.slave_certs_last_sync_at = nowStr()
+  form.value.slave_certs_last_status = 'syncing'
+  form.value.slave_certs_last_msg = '同步中，请稍等...'
   try {
     await api.post('/sync/trigger_certs')
-    ElMessage.success('已触发证书同步，约3秒后刷新状态')
     setTimeout(load, 4000)
   } catch (e) { ElMessage.error('触发失败') }
   triggeringCerts.value = false
@@ -562,25 +620,15 @@ function genToken() {
   form.value.sync_token = randToken()
   ElMessage.success('Token 已生成，请记得保存')
 }
-function genRulesToken() {
-  form.value.sync_rules_token = randToken()
-  ElMessage.success('规则同步 Token 已生成，请记得保存')
-}
-function genCertsToken() {
-  form.value.sync_certs_token = randToken()
-  ElMessage.success('证书同步 Token 已生成，请记得保存')
-}
-function genFilterToken() {
-  form.value.sync_filter_token = randToken()
-  ElMessage.success('黑名单同步 Token 已生成，请记得保存')
-}
 
 async function triggerFilter() {
   if (!form.value.slave_filter_url) { ElMessage.warning('请先设置主节点地址'); return }
   triggeringFilter.value = true
+  form.value.slave_filter_last_sync_at = nowStr()
+  form.value.slave_filter_last_status = 'syncing'
+  form.value.slave_filter_last_msg = '同步中，请稍等...'
   try {
     await api.post('/sync/trigger_filter')
-    ElMessage.success('已触发黑名单同步，约3秒后刷新状态')
     setTimeout(load, 4000)
   } catch (e) { ElMessage.error('触发失败') }
   triggeringFilter.value = false
@@ -799,6 +847,50 @@ onMounted(load)
   border-radius: 6px;
   display: flex;
   align-items: center;
+}
+/* 从节点同步列表 */
+.slave-sync-list {
+  padding: 0 4px;
+}
+.slave-sync-item {
+  padding: 16px 0;
+}
+.slave-sync-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.slave-sync-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+}
+.slave-sync-body {
+  background: #fafafa;
+  border: 1px solid #f0f2f5;
+  border-radius: 8px;
+  padding: 16px 20px 8px;
+  transition: opacity 0.2s;
+}
+.slave-sync-body.slave-sync-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.slave-sync-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0 4px;
+  flex-wrap: wrap;
+}
+.sync-inline-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .data-card {
   text-align: center;

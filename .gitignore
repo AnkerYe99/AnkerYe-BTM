@@ -14,6 +14,11 @@ frontend/dist/
 backend/frontend/dist/*
 !backend/frontend/dist/index.html
 
+# Compiled binaries
+backend/ankerye-flow-server-amd64
+backend/ankerye-flow-server-arm64
+backend/ankerye-flow-server
+
 # Deploy artifacts
 deploy/*.tar.gz
 

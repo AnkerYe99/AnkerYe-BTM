@@ -1,11 +1,9 @@
 package handler
 
 import (
-	"crypto/sha256"
+	"crypto/md5"
 	"fmt"
-	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,64 +13,236 @@ import (
 	"ankerye-flow/util"
 )
 
-// upsertSyncNode 按 address 做 upsert，更新对应类型的最后同步时间。
-// syncType: "rules" | "certs" | "filter" | "" (全量)
+// ── Token 工具 ────────────────────────────────────────────────────────────────
+
+func getSyncToken(specificKey string) string {
+	var v string
+	if specificKey != "" {
+		db.DB.QueryRow(`SELECT v FROM system_settings WHERE k=?`, specificKey).Scan(&v)
+	}
+	if v == "" {
+		db.DB.QueryRow(`SELECT v FROM system_settings WHERE k='sync_token'`).Scan(&v)
+	}
+	return v
+}
+
+// ── upsertSyncNode ────────────────────────────────────────────────────────────
+
 func upsertSyncNode(addr, version, syncType string) {
 	now := time.Now().Format("2006-01-02 15:04:05")
-	var q string
+	var col string
 	switch syncType {
 	case "rules":
-		q = `INSERT INTO sync_nodes(name,address,last_sync_at,last_version,last_rules_sync_at,status,last_err)
-			VALUES(?,?,?,?,?,?,?)
-			ON CONFLICT(address) DO UPDATE SET
-			last_sync_at=excluded.last_sync_at, last_version=excluded.last_version,
-			last_rules_sync_at=excluded.last_rules_sync_at, status='ok', last_err=''`
+		col = "last_rules_sync_at"
 	case "certs":
-		q = `INSERT INTO sync_nodes(name,address,last_sync_at,last_version,last_certs_sync_at,status,last_err)
+		col = "last_certs_sync_at"
+	case "filter":
+		col = "last_filter_sync_at"
+	}
+
+	if col != "" {
+		q := fmt.Sprintf(`INSERT INTO sync_nodes(name,address,last_sync_at,last_version,%s,status,last_err)
 			VALUES(?,?,?,?,?,?,?)
 			ON CONFLICT(address) DO UPDATE SET
 			last_sync_at=excluded.last_sync_at, last_version=excluded.last_version,
-			last_certs_sync_at=excluded.last_certs_sync_at, status='ok', last_err=''`
-	case "filter":
-		q = `INSERT INTO sync_nodes(name,address,last_sync_at,last_version,last_filter_sync_at,status,last_err)
-			VALUES(?,?,?,?,?,?,?)
-			ON CONFLICT(address) DO UPDATE SET
-			last_sync_at=excluded.last_sync_at,
-			last_filter_sync_at=excluded.last_filter_sync_at, status='ok', last_err=''`
-	default:
-		q = `INSERT INTO sync_nodes(name,address,last_sync_at,last_version,status,last_err)
+			%s=excluded.%s, status='ok', last_err=''`, col, col, col)
+		db.DB.Exec(q, addr, addr, now, version, now, "ok", "")
+	} else {
+		db.DB.Exec(`INSERT INTO sync_nodes(name,address,last_sync_at,last_version,status,last_err)
 			VALUES(?,?,?,?,?,?)
 			ON CONFLICT(address) DO UPDATE SET
 			last_sync_at=excluded.last_sync_at, last_version=excluded.last_version,
-			status='ok', last_err=''`
-		db.DB.Exec(q, addr, addr, now, version, "ok", "")
-		return
+			status='ok', last_err=''`, addr, addr, now, version, "ok", "")
 	}
-	db.DB.Exec(q, addr, addr, now, version, now, "ok", "")
 }
 
-// syncTombstones 返回指定表在 since 之后删除的 record_key 列表
-func syncTombstones(tableName, since string) []string {
-	var keys []string
-	rows, _ := db.DB.Query(`SELECT record_key FROM sync_tombstones
-		WHERE table_name=? AND deleted_at > ? ORDER BY id`, tableName, since)
-	if rows != nil {
-		for rows.Next() {
-			var k string
-			rows.Scan(&k)
-			keys = append(keys, k)
+// ── MD5 计算 ─────────────────────────────────────────────────────────────────
+//
+// 规则规范格式（主从两侧必须完全一致）：
+//   规则按 id ASC 排序，每条写一行：
+//     R:{id}|{name}|{protocol}|{listen_port}|{listen_stack}|{https_enabled}|{https_port}|
+//       {server_name}|{lb_method}|{ssl_cert_id}|{ssl_redirect}|{hc_enabled}|{hc_interval}|
+//       {hc_timeout}|{hc_path}|{hc_fall}|{hc_rise}|{log_max_size}|{custom_config}|{status}
+//   上游服务器按 address ASC, port ASC 排序，紧跟其所属规则行之后：
+//     S:{address}|{port}|{weight}|{state}
+
+type ruleForExport struct {
+	ID           int64
+	Name         string
+	Protocol     string
+	ListenPort   int64
+	ListenStack  string
+	HttpsEnabled int64
+	HttpsPort    int64
+	ServerName   string
+	LbMethod     string
+	SslCertID    int64
+	SslRedirect  int64
+	HcEnabled    int64
+	HcInterval   int64
+	HcTimeout    int64
+	HcPath       string
+	HcFall       int64
+	HcRise       int64
+	LogMaxSize   string
+	CustomConfig string
+	Status       int64
+	Servers      []serverForExport
+}
+
+type serverForExport struct {
+	Address string
+	Port    int64
+	Weight  int64
+	State   string
+}
+
+func queryRulesForExport() []ruleForExport {
+	var rules []ruleForExport
+	rrows, _ := db.DB.Query(`SELECT id,name,protocol,listen_port,IFNULL(listen_stack,'both'),
+		https_enabled,IFNULL(https_port,0),IFNULL(server_name,''),lb_method,
+		IFNULL(ssl_cert_id,0),ssl_redirect,hc_enabled,hc_interval,hc_timeout,
+		IFNULL(hc_path,'/'),hc_fall,hc_rise,IFNULL(log_max_size,'5M'),
+		IFNULL(custom_config,''),status FROM rules ORDER BY id ASC`)
+	if rrows == nil {
+		return rules
+	}
+	defer rrows.Close()
+	for rrows.Next() {
+		var r ruleForExport
+		rrows.Scan(&r.ID, &r.Name, &r.Protocol, &r.ListenPort, &r.ListenStack,
+			&r.HttpsEnabled, &r.HttpsPort, &r.ServerName, &r.LbMethod,
+			&r.SslCertID, &r.SslRedirect, &r.HcEnabled, &r.HcInterval, &r.HcTimeout,
+			&r.HcPath, &r.HcFall, &r.HcRise, &r.LogMaxSize, &r.CustomConfig, &r.Status)
+		rules = append(rules, r)
+	}
+	for i := range rules {
+		srows, _ := db.DB.Query(`SELECT address,port,weight,state FROM upstream_servers
+			WHERE rule_id=? ORDER BY address ASC, port ASC`, rules[i].ID)
+		if srows != nil {
+			for srows.Next() {
+				var s serverForExport
+				srows.Scan(&s.Address, &s.Port, &s.Weight, &s.State)
+				rules[i].Servers = append(rules[i].Servers, s)
+			}
+			srows.Close()
 		}
-		rows.Close()
 	}
-	return keys
+	return rules
 }
 
-// ── 全量同步（兼容旧从节点）─────────────────────────────────────────
+func hashRules(rules []ruleForExport) string {
+	h := md5.New()
+	for _, r := range rules {
+		fmt.Fprintf(h, "R:%d|%q|%q|%d|%q|%d|%d|%q|%q|%d|%d|%d|%d|%d|%q|%d|%d|%q|%q|%d\n",
+			r.ID, r.Name, r.Protocol, r.ListenPort, r.ListenStack,
+			r.HttpsEnabled, r.HttpsPort, r.ServerName, r.LbMethod,
+			r.SslCertID, r.SslRedirect, r.HcEnabled, r.HcInterval, r.HcTimeout,
+			r.HcPath, r.HcFall, r.HcRise, r.LogMaxSize, r.CustomConfig, r.Status)
+		for _, s := range r.Servers {
+			fmt.Fprintf(h, "S:%q|%d|%d|%q\n", s.Address, s.Port, s.Weight, s.State)
+		}
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// 证书规范格式：按 domain ASC 排序，每条：C:{domain}|{cert_pem}
+
+type certForExport struct {
+	Domain    string
+	CertPEM   string
+	KeyPEM    string
+	ExpireAt  string
+	AutoRenew int64
+}
+
+func queryCertsForExport() []certForExport {
+	var certs []certForExport
+	rows, _ := db.DB.Query(`SELECT domain,cert_pem,key_pem,IFNULL(expire_at,''),IFNULL(auto_renew,0)
+		FROM ssl_certs ORDER BY domain ASC`)
+	if rows == nil {
+		return certs
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c certForExport
+		rows.Scan(&c.Domain, &c.CertPEM, &c.KeyPEM, &c.ExpireAt, &c.AutoRenew)
+		certs = append(certs, c)
+	}
+	return certs
+}
+
+func hashCerts(certs []certForExport) string {
+	h := md5.New()
+	for _, c := range certs {
+		fmt.Fprintf(h, "C:%q|%q\n", c.Domain, c.CertPEM)
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// 过滤规范格式：
+//   黑名单按 type ASC, value ASC：B:{type}|{value}|{note}|{enabled}
+//   白名单按 type ASC, value ASC：W:{type}|{value}|{note}|{enabled}
+
+type blItemForExport struct {
+	Type      string
+	Value     string
+	Note      string
+	Hits      int64
+	AutoAdded int64
+	Enabled   int64
+}
+
+type wlItemForExport struct {
+	Type    string
+	Value   string
+	Note    string
+	Enabled int64
+}
+
+func queryFilterForExport() ([]blItemForExport, []wlItemForExport) {
+	var bl []blItemForExport
+	blrows, _ := db.DB.Query(`SELECT type,value,note,hits,auto_added,enabled
+		FROM filter_blacklist ORDER BY type ASC, value ASC`)
+	if blrows != nil {
+		for blrows.Next() {
+			var item blItemForExport
+			blrows.Scan(&item.Type, &item.Value, &item.Note, &item.Hits, &item.AutoAdded, &item.Enabled)
+			bl = append(bl, item)
+		}
+		blrows.Close()
+	}
+
+	var wl []wlItemForExport
+	wlrows, _ := db.DB.Query(`SELECT type,value,note,enabled
+		FROM filter_whitelist ORDER BY type ASC, value ASC`)
+	if wlrows != nil {
+		for wlrows.Next() {
+			var item wlItemForExport
+			wlrows.Scan(&item.Type, &item.Value, &item.Note, &item.Enabled)
+			wl = append(wl, item)
+		}
+		wlrows.Close()
+	}
+	return bl, wl
+}
+
+func hashFilter(bl []blItemForExport, wl []wlItemForExport) string {
+	h := md5.New()
+	for _, item := range bl {
+		fmt.Fprintf(h, "B:%q|%q|%q|%d\n", item.Type, item.Value, item.Note, item.Enabled)
+	}
+	for _, item := range wl {
+		fmt.Fprintf(h, "W:%q|%q|%q|%d\n", item.Type, item.Value, item.Note, item.Enabled)
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// ── 全量同步（兼容旧从节点）──────────────────────────────────────────────────
 
 func SyncExport(c *gin.Context) {
 	token := c.Query("token")
-	var saved string
-	db.DB.QueryRow(`SELECT v FROM system_settings WHERE k='sync_token'`).Scan(&saved)
+	saved := getSyncToken("")
 	if saved == "" || token != saved {
 		util.Fail(c, 403, "token 无效")
 		return
@@ -84,84 +254,35 @@ func SyncExport(c *gin.Context) {
 		return
 	}
 
-	rules := []gin.H{}
-	rrows, _ := db.DB.Query(`SELECT id,name,protocol,listen_port,IFNULL(listen_stack,'both'),
-		https_enabled,IFNULL(https_port,0),IFNULL(server_name,''),lb_method,
-		IFNULL(ssl_cert_id,0),ssl_redirect,hc_enabled,hc_interval,hc_timeout,
-		IFNULL(hc_path,'/'),hc_fall,hc_rise,IFNULL(log_max_size,'5M'),
-		IFNULL(custom_config,''),status FROM rules ORDER BY id`)
-	if rrows != nil {
-		for rrows.Next() {
-			var id, listenPort, httpsEnabled, httpsPort, sslCertID, sslRedirect int64
-			var hcEnabled, hcInterval, hcTimeout, hcFall, hcRise, status int64
-			var name, protocol, listenStack, serverName, lbMethod, hcPath, logMaxSize, customConfig string
-			rrows.Scan(&id, &name, &protocol, &listenPort, &listenStack,
-				&httpsEnabled, &httpsPort, &serverName, &lbMethod,
-				&sslCertID, &sslRedirect, &hcEnabled, &hcInterval, &hcTimeout,
-				&hcPath, &hcFall, &hcRise, &logMaxSize, &customConfig, &status)
-
-			servers := []gin.H{}
-			srows, _ := db.DB.Query(`SELECT address,port,weight,state FROM upstream_servers WHERE rule_id=? ORDER BY id`, id)
-			if srows != nil {
-				for srows.Next() {
-					var addr, state string
-					var port, weight int64
-					srows.Scan(&addr, &port, &weight, &state)
-					servers = append(servers, gin.H{"address": addr, "port": port, "weight": weight, "state": state})
-				}
-				srows.Close()
-			}
-
-			rules = append(rules, gin.H{
-				"id": id, "name": name, "protocol": protocol,
-				"listen_port": listenPort, "listen_stack": listenStack,
-				"https_enabled": httpsEnabled, "https_port": httpsPort,
-				"server_name": serverName, "lb_method": lbMethod,
-				"ssl_cert_id": sslCertID, "ssl_redirect": sslRedirect,
-				"hc_enabled": hcEnabled, "hc_interval": hcInterval, "hc_timeout": hcTimeout,
-				"hc_path": hcPath, "hc_fall": hcFall, "hc_rise": hcRise,
-				"log_max_size": logMaxSize, "custom_config": customConfig, "status": status,
-				"servers": servers,
-			})
+	rules := queryRulesForExport()
+	rulesJSON := make([]gin.H, 0, len(rules))
+	for _, r := range rules {
+		servers := make([]gin.H, 0, len(r.Servers))
+		for _, s := range r.Servers {
+			servers = append(servers, gin.H{"address": s.Address, "port": s.Port, "weight": s.Weight, "state": s.State})
 		}
-		rrows.Close()
+		rulesJSON = append(rulesJSON, gin.H{
+			"id": r.ID, "name": r.Name, "protocol": r.Protocol,
+			"listen_port": r.ListenPort, "listen_stack": r.ListenStack,
+			"https_enabled": r.HttpsEnabled, "https_port": r.HttpsPort,
+			"server_name": r.ServerName, "lb_method": r.LbMethod,
+			"ssl_cert_id": r.SslCertID, "ssl_redirect": r.SslRedirect,
+			"hc_enabled": r.HcEnabled, "hc_interval": r.HcInterval, "hc_timeout": r.HcTimeout,
+			"hc_path": r.HcPath, "hc_fall": r.HcFall, "hc_rise": r.HcRise,
+			"log_max_size": r.LogMaxSize, "custom_config": r.CustomConfig, "status": r.Status,
+			"servers": servers,
+		})
 	}
 
-	certs := []gin.H{}
+	certs := queryCertsForExport()
+	certsJSON := make([]gin.H, 0, len(certs))
 	certMap := map[string]gin.H{}
-	crows, _ := db.DB.Query(`SELECT domain,cert_pem,key_pem,IFNULL(expire_at,''),IFNULL(auto_renew,0) FROM ssl_certs ORDER BY id`)
-	if crows != nil {
-		for crows.Next() {
-			var domain, certPEM, keyPEM, expireAt string
-			var autoRenew int64
-			crows.Scan(&domain, &certPEM, &keyPEM, &expireAt, &autoRenew)
-			certs = append(certs, gin.H{
-				"domain": domain, "cert_pem": certPEM, "key_pem": keyPEM,
-				"expire_at": expireAt, "auto_renew": autoRenew,
-			})
-			certMap[domain] = gin.H{"cert_pem": certPEM, "key_pem": keyPEM}
-		}
-		crows.Close()
-	}
-
-	settings := map[string]string{}
-	skipKeys := map[string]bool{
-		"tencent_secret_id": true, "tencent_secret_key": true,
-		"acme_email": true, "acme_account_json": true, "acme_account_key": true,
-		"dnspod_id": true, "dnspod_key": true,
-		"sync_token": true, "slave_master_url": true, "slave_sync_token": true,
-		"slave_interval": true, "slave_last_sync_at": true, "slave_last_status": true, "slave_last_msg": true,
-	}
-	srows2, _ := db.DB.Query(`SELECT k,v FROM system_settings`)
-	if srows2 != nil {
-		for srows2.Next() {
-			var k, v string
-			srows2.Scan(&k, &v)
-			if !skipKeys[k] {
-				settings[k] = v
-			}
-		}
-		srows2.Close()
+	for _, c2 := range certs {
+		certsJSON = append(certsJSON, gin.H{
+			"domain": c2.Domain, "cert_pem": c2.CertPEM, "key_pem": c2.KeyPEM,
+			"expire_at": c2.ExpireAt, "auto_renew": c2.AutoRenew,
+		})
+		certMap[c2.Domain] = gin.H{"cert_pem": c2.CertPEM, "key_pem": c2.KeyPEM}
 	}
 
 	fromAddr := c.ClientIP()
@@ -171,388 +292,173 @@ func SyncExport(c *gin.Context) {
 		"version":       version,
 		"generated_at":  time.Now().Format(time.RFC3339),
 		"nginx_configs": configs,
-		"rules":         rules,
-		"certs":         certs,
+		"rules":         rulesJSON,
+		"certs":         certsJSON,
 		"cert_map":      certMap,
-		"settings":      settings,
 	})
 }
 
-// ── 规则同步（支持 ?since= 增量）──────────────────────────────────
+// ── 规则同步（MD5 比对，不一致则全量下发）────────────────────────────────────
 
 func SyncRulesExport(c *gin.Context) {
 	token := c.Query("token")
-	var saved string
-	db.DB.QueryRow(`SELECT v FROM system_settings WHERE k='sync_rules_token'`).Scan(&saved)
-	if saved == "" {
-		db.DB.QueryRow(`SELECT v FROM system_settings WHERE k='sync_token'`).Scan(&saved)
-	}
+	saved := getSyncToken("sync_rules_token")
 	if saved == "" || token != saved {
 		util.Fail(c, 403, "token 无效")
 		return
 	}
 
-	since := strings.TrimSpace(c.Query("since"))
+	slaveMD5 := c.Query("md5")
 	fromAddr := c.ClientIP()
 
-	// ── 增量模式 ────────────────────────────────────────────────────
-	if since != "" {
-		// 变更的规则
-		changedRules := []gin.H{}
-		rrows, _ := db.DB.Query(`SELECT id,name,protocol,listen_port,IFNULL(listen_stack,'both'),
-			https_enabled,IFNULL(https_port,0),IFNULL(server_name,''),lb_method,
-			IFNULL(ssl_cert_id,0),ssl_redirect,hc_enabled,hc_interval,hc_timeout,
-			IFNULL(hc_path,'/'),hc_fall,hc_rise,IFNULL(log_max_size,'5M'),
-			IFNULL(custom_config,''),status FROM rules WHERE updated_at > ? ORDER BY id`, since)
-		if rrows != nil {
-			for rrows.Next() {
-				var id, listenPort, httpsEnabled, httpsPort, sslCertID, sslRedirect int64
-				var hcEnabled, hcInterval, hcTimeout, hcFall, hcRise, status int64
-				var name, protocol, listenStack, serverName, lbMethod, hcPath, logMaxSize, customConfig string
-				rrows.Scan(&id, &name, &protocol, &listenPort, &listenStack,
-					&httpsEnabled, &httpsPort, &serverName, &lbMethod,
-					&sslCertID, &sslRedirect, &hcEnabled, &hcInterval, &hcTimeout,
-					&hcPath, &hcFall, &hcRise, &logMaxSize, &customConfig, &status)
-				servers := []gin.H{}
-				srows, _ := db.DB.Query(`SELECT address,port,weight,state FROM upstream_servers WHERE rule_id=? ORDER BY id`, id)
-				if srows != nil {
-					for srows.Next() {
-						var addr, state string
-						var port, weight int64
-						srows.Scan(&addr, &port, &weight, &state)
-						servers = append(servers, gin.H{"address": addr, "port": port, "weight": weight, "state": state})
-					}
-					srows.Close()
-				}
-				changedRules = append(changedRules, gin.H{
-					"id": id, "name": name, "protocol": protocol,
-					"listen_port": listenPort, "listen_stack": listenStack,
-					"https_enabled": httpsEnabled, "https_port": httpsPort,
-					"server_name": serverName, "lb_method": lbMethod,
-					"ssl_cert_id": sslCertID, "ssl_redirect": sslRedirect,
-					"hc_enabled": hcEnabled, "hc_interval": hcInterval, "hc_timeout": hcTimeout,
-					"hc_path": hcPath, "hc_fall": hcFall, "hc_rise": hcRise,
-					"log_max_size": logMaxSize, "custom_config": customConfig, "status": status,
-					"servers": servers,
-				})
-			}
-			rrows.Close()
+	rules := queryRulesForExport()
+	masterMD5 := hashRules(rules)
+
+	if slaveMD5 != "" && slaveMD5 == masterMD5 {
+		upsertSyncNode(fromAddr, masterMD5, "rules")
+		util.OK(c, gin.H{"match": true, "master_md5": masterMD5})
+		return
+	}
+
+	configs, version, _ := engine.ExportAll()
+
+	bl, wl := queryFilterForExport()
+
+	rulesJSON := make([]gin.H, 0, len(rules))
+	for _, r := range rules {
+		servers := make([]gin.H, 0, len(r.Servers))
+		for _, s := range r.Servers {
+			servers = append(servers, gin.H{"address": s.Address, "port": s.Port, "weight": s.Weight, "state": s.State})
 		}
-
-		deletedIDs := syncTombstones("rules", since)
-
-		// 即使规则无变化，也返回最新的 nginx 配置（保证文件一致）
-		configs, version, _ := engine.ExportAll()
-
-		upsertSyncNode(fromAddr, version, "rules")
-
-		util.OK(c, gin.H{
-			"is_incremental": true,
-			"since":          since,
-			"version":        version,
-			"generated_at":   time.Now().Format(time.RFC3339),
-			"nginx_configs":  configs,
-			"changed_rules":  changedRules,
-			"deleted_ids":    deletedIDs,
+		rulesJSON = append(rulesJSON, gin.H{
+			"id": r.ID, "name": r.Name, "protocol": r.Protocol,
+			"listen_port": r.ListenPort, "listen_stack": r.ListenStack,
+			"https_enabled": r.HttpsEnabled, "https_port": r.HttpsPort,
+			"server_name": r.ServerName, "lb_method": r.LbMethod,
+			"ssl_cert_id": r.SslCertID, "ssl_redirect": r.SslRedirect,
+			"hc_enabled": r.HcEnabled, "hc_interval": r.HcInterval, "hc_timeout": r.HcTimeout,
+			"hc_path": r.HcPath, "hc_fall": r.HcFall, "hc_rise": r.HcRise,
+			"log_max_size": r.LogMaxSize, "custom_config": r.CustomConfig, "status": r.Status,
+			"servers": servers,
 		})
-		return
 	}
 
-	// ── 全量模式 ────────────────────────────────────────────────────
-	configs, version, err := engine.ExportAll()
-	if err != nil {
-		util.Fail(c, 500, err.Error())
-		return
+	blJSON := make([]gin.H, 0, len(bl))
+	for _, item := range bl {
+		blJSON = append(blJSON, gin.H{
+			"type": item.Type, "value": item.Value, "note": item.Note,
+			"hits": item.Hits, "auto_added": item.AutoAdded, "enabled": item.Enabled,
+		})
 	}
-
-	rules := []gin.H{}
-	rrows, _ := db.DB.Query(`SELECT id,name,protocol,listen_port,IFNULL(listen_stack,'both'),
-		https_enabled,IFNULL(https_port,0),IFNULL(server_name,''),lb_method,
-		IFNULL(ssl_cert_id,0),ssl_redirect,hc_enabled,hc_interval,hc_timeout,
-		IFNULL(hc_path,'/'),hc_fall,hc_rise,IFNULL(log_max_size,'5M'),
-		IFNULL(custom_config,''),status FROM rules ORDER BY id`)
-	if rrows != nil {
-		for rrows.Next() {
-			var id, listenPort, httpsEnabled, httpsPort, sslCertID, sslRedirect int64
-			var hcEnabled, hcInterval, hcTimeout, hcFall, hcRise, status int64
-			var name, protocol, listenStack, serverName, lbMethod, hcPath, logMaxSize, customConfig string
-			rrows.Scan(&id, &name, &protocol, &listenPort, &listenStack,
-				&httpsEnabled, &httpsPort, &serverName, &lbMethod,
-				&sslCertID, &sslRedirect, &hcEnabled, &hcInterval, &hcTimeout,
-				&hcPath, &hcFall, &hcRise, &logMaxSize, &customConfig, &status)
-			servers := []gin.H{}
-			srows, _ := db.DB.Query(`SELECT address,port,weight,state FROM upstream_servers WHERE rule_id=? ORDER BY id`, id)
-			if srows != nil {
-				for srows.Next() {
-					var addr, state string
-					var port, weight int64
-					srows.Scan(&addr, &port, &weight, &state)
-					servers = append(servers, gin.H{"address": addr, "port": port, "weight": weight, "state": state})
-				}
-				srows.Close()
-			}
-			rules = append(rules, gin.H{
-				"id": id, "name": name, "protocol": protocol,
-				"listen_port": listenPort, "listen_stack": listenStack,
-				"https_enabled": httpsEnabled, "https_port": httpsPort,
-				"server_name": serverName, "lb_method": lbMethod,
-				"ssl_cert_id": sslCertID, "ssl_redirect": sslRedirect,
-				"hc_enabled": hcEnabled, "hc_interval": hcInterval, "hc_timeout": hcTimeout,
-				"hc_path": hcPath, "hc_fall": hcFall, "hc_rise": hcRise,
-				"log_max_size": logMaxSize, "custom_config": customConfig, "status": status,
-				"servers": servers,
-			})
-		}
-		rrows.Close()
-	}
-
-	filterBL := []gin.H{}
-	blrows, _ := db.DB.Query(`SELECT type,value,note,hits,auto_added,enabled FROM filter_blacklist ORDER BY id`)
-	if blrows != nil {
-		for blrows.Next() {
-			var typ, value, note string
-			var hits, autoAdded, enabled int64
-			blrows.Scan(&typ, &value, &note, &hits, &autoAdded, &enabled)
-			filterBL = append(filterBL, gin.H{
-				"type": typ, "value": value, "note": note,
-				"hits": hits, "auto_added": autoAdded, "enabled": enabled,
-			})
-		}
-		blrows.Close()
-	}
-	filterWL := []gin.H{}
-	wlrows, _ := db.DB.Query(`SELECT type,value,note,enabled FROM filter_whitelist ORDER BY id`)
-	if wlrows != nil {
-		for wlrows.Next() {
-			var typ, value, note string
-			var enabled int64
-			wlrows.Scan(&typ, &value, &note, &enabled)
-			filterWL = append(filterWL, gin.H{
-				"type": typ, "value": value, "note": note, "enabled": enabled,
-			})
-		}
-		wlrows.Close()
+	wlJSON := make([]gin.H, 0, len(wl))
+	for _, item := range wl {
+		wlJSON = append(wlJSON, gin.H{
+			"type": item.Type, "value": item.Value, "note": item.Note, "enabled": item.Enabled,
+		})
 	}
 
 	upsertSyncNode(fromAddr, version, "rules")
 
 	util.OK(c, gin.H{
-		"is_incremental":   false,
+		"match":            false,
+		"master_md5":       masterMD5,
 		"version":          version,
 		"generated_at":     time.Now().Format(time.RFC3339),
 		"nginx_configs":    configs,
-		"rules":            rules,
-		"filter_blacklist": filterBL,
-		"filter_whitelist": filterWL,
+		"rules":            rulesJSON,
+		"filter_blacklist": blJSON,
+		"filter_whitelist": wlJSON,
 	})
 }
 
-// ── 证书同步（支持 ?since= 增量）──────────────────────────────────
+// ── 证书同步（MD5 比对）──────────────────────────────────────────────────────
 
 func SyncCertsExport(c *gin.Context) {
 	token := c.Query("token")
-	var saved string
-	db.DB.QueryRow(`SELECT v FROM system_settings WHERE k='sync_certs_token'`).Scan(&saved)
-	if saved == "" {
-		db.DB.QueryRow(`SELECT v FROM system_settings WHERE k='sync_token'`).Scan(&saved)
-	}
+	saved := getSyncToken("sync_certs_token")
 	if saved == "" || token != saved {
 		util.Fail(c, 403, "token 无效")
 		return
 	}
 
-	since := strings.TrimSpace(c.Query("since"))
+	slaveMD5 := c.Query("md5")
 	fromAddr := c.ClientIP()
 
-	// ── 增量模式 ────────────────────────────────────────────────────
-	if since != "" {
-		changedCerts := []gin.H{}
-		crows, _ := db.DB.Query(`SELECT domain,cert_pem,key_pem,IFNULL(expire_at,''),IFNULL(auto_renew,0)
-			FROM ssl_certs WHERE updated_at > ? ORDER BY id`, since)
-		if crows != nil {
-			for crows.Next() {
-				var domain, certPEM, keyPEM, expireAt string
-				var autoRenew int64
-				crows.Scan(&domain, &certPEM, &keyPEM, &expireAt, &autoRenew)
-				changedCerts = append(changedCerts, gin.H{
-					"domain": domain, "cert_pem": certPEM, "key_pem": keyPEM,
-					"expire_at": expireAt, "auto_renew": autoRenew,
-				})
-			}
-			crows.Close()
-		}
+	certs := queryCertsForExport()
+	masterMD5 := hashCerts(certs)
 
-		deletedDomains := syncTombstones("ssl_certs", since)
-
-		upsertSyncNode(fromAddr, "", "certs")
-
-		util.OK(c, gin.H{
-			"is_incremental":  true,
-			"since":           since,
-			"generated_at":    time.Now().Format(time.RFC3339),
-			"changed_certs":   changedCerts,
-			"deleted_domains": deletedDomains,
-		})
+	if slaveMD5 != "" && slaveMD5 == masterMD5 {
+		upsertSyncNode(fromAddr, masterMD5, "certs")
+		util.OK(c, gin.H{"match": true, "master_md5": masterMD5})
 		return
 	}
 
-	// ── 全量模式 ────────────────────────────────────────────────────
-	type certRow struct {
-		domain, certPEM, keyPEM, expireAt string
-		autoRenew                         int64
-	}
-	var rows []certRow
-	crows, _ := db.DB.Query(`SELECT domain,cert_pem,key_pem,IFNULL(expire_at,''),IFNULL(auto_renew,0) FROM ssl_certs ORDER BY id`)
-	if crows != nil {
-		for crows.Next() {
-			var r certRow
-			crows.Scan(&r.domain, &r.certPEM, &r.keyPEM, &r.expireAt, &r.autoRenew)
-			rows = append(rows, r)
-		}
-		crows.Close()
-	}
-
-	h := sha256.New()
-	domains := make([]string, len(rows))
-	for i, r := range rows {
-		domains[i] = r.domain
-	}
-	sort.Strings(domains)
-	domainMap := make(map[string]certRow, len(rows))
-	for _, r := range rows {
-		domainMap[r.domain] = r
-	}
-	for _, d := range domains {
-		r := domainMap[d]
-		fmt.Fprintf(h, "%s|%s|%s\n", r.domain, r.expireAt, r.certPEM[:min(64, len(r.certPEM))])
-	}
-	version := fmt.Sprintf("%x", h.Sum(nil))[:16]
-
-	certs := make([]gin.H, 0, len(rows))
-	for _, r := range rows {
-		certs = append(certs, gin.H{
-			"domain": r.domain, "cert_pem": r.certPEM, "key_pem": r.keyPEM,
-			"expire_at": r.expireAt, "auto_renew": r.autoRenew,
+	certsJSON := make([]gin.H, 0, len(certs))
+	for _, c2 := range certs {
+		certsJSON = append(certsJSON, gin.H{
+			"domain": c2.Domain, "cert_pem": c2.CertPEM, "key_pem": c2.KeyPEM,
+			"expire_at": c2.ExpireAt, "auto_renew": c2.AutoRenew,
 		})
 	}
 
-	upsertSyncNode(fromAddr, version, "certs")
+	upsertSyncNode(fromAddr, masterMD5, "certs")
 
 	util.OK(c, gin.H{
-		"is_incremental":  false,
-		"version":         version,
-		"generated_at":    time.Now().Format(time.RFC3339),
-		"certs":           certs,
-		"deleted_domains": nil,
+		"match":        false,
+		"master_md5":   masterMD5,
+		"generated_at": time.Now().Format(time.RFC3339),
+		"certs":        certsJSON,
 	})
 }
 
-// ── 黑白名单同步（支持 ?since= 增量）─────────────────────────────
+// ── 黑白名单同步（MD5 比对）──────────────────────────────────────────────────
 
 func SyncFilterExport(c *gin.Context) {
 	token := c.Query("token")
-	var expected string
-	db.DB.QueryRow(`SELECT v FROM system_settings WHERE k='sync_filter_token'`).Scan(&expected)
-	if expected == "" {
-		db.DB.QueryRow(`SELECT v FROM system_settings WHERE k='sync_token'`).Scan(&expected)
-	}
-	if expected == "" || token != expected {
+	saved := getSyncToken("sync_filter_token")
+	if saved == "" || token != saved {
 		util.Fail(c, 403, "token 无效")
 		return
 	}
 
-	since := strings.TrimSpace(c.Query("since"))
+	slaveMD5 := c.Query("md5")
 	fromAddr := c.ClientIP()
 
-	// ── 增量模式 ────────────────────────────────────────────────────
-	if since != "" {
-		changedBL := []gin.H{}
-		blrows, _ := db.DB.Query(`SELECT type,value,note,hits,auto_added,enabled FROM filter_blacklist
-			WHERE updated_at > ? ORDER BY id`, since)
-		if blrows != nil {
-			for blrows.Next() {
-				var typ, value, note string
-				var hits, autoAdded, enabled int64
-				blrows.Scan(&typ, &value, &note, &hits, &autoAdded, &enabled)
-				changedBL = append(changedBL, gin.H{
-					"type": typ, "value": value, "note": note,
-					"hits": hits, "auto_added": autoAdded, "enabled": enabled,
-				})
-			}
-			blrows.Close()
-		}
-		changedWL := []gin.H{}
-		wlrows, _ := db.DB.Query(`SELECT type,value,note,enabled FROM filter_whitelist
-			WHERE updated_at > ? ORDER BY id`, since)
-		if wlrows != nil {
-			for wlrows.Next() {
-				var typ, value, note string
-				var enabled int64
-				wlrows.Scan(&typ, &value, &note, &enabled)
-				changedWL = append(changedWL, gin.H{
-					"type": typ, "value": value, "note": note, "enabled": enabled,
-				})
-			}
-			wlrows.Close()
-		}
-		deletedBL := syncTombstones("filter_blacklist", since)
-		deletedWL := syncTombstones("filter_whitelist", since)
+	bl, wl := queryFilterForExport()
+	masterMD5 := hashFilter(bl, wl)
 
-		upsertSyncNode(fromAddr, "", "filter")
-
-		util.OK(c, gin.H{
-			"is_incremental":         true,
-			"since":                  since,
-			"generated_at":           time.Now().Format(time.RFC3339),
-			"changed_blacklist":      changedBL,
-			"changed_whitelist":      changedWL,
-			"deleted_blacklist_keys": deletedBL,
-			"deleted_whitelist_keys": deletedWL,
-		})
+	if slaveMD5 != "" && slaveMD5 == masterMD5 {
+		upsertSyncNode(fromAddr, masterMD5, "filter")
+		util.OK(c, gin.H{"match": true, "master_md5": masterMD5})
 		return
 	}
 
-	// ── 全量模式 ────────────────────────────────────────────────────
-	filterBL := []gin.H{}
-	blrows, _ := db.DB.Query(`SELECT type,value,note,hits,auto_added,enabled FROM filter_blacklist ORDER BY id`)
-	if blrows != nil {
-		for blrows.Next() {
-			var typ, value, note string
-			var hits, autoAdded, enabled int64
-			blrows.Scan(&typ, &value, &note, &hits, &autoAdded, &enabled)
-			filterBL = append(filterBL, gin.H{
-				"type": typ, "value": value, "note": note,
-				"hits": hits, "auto_added": autoAdded, "enabled": enabled,
-			})
-		}
-		blrows.Close()
+	blJSON := make([]gin.H, 0, len(bl))
+	for _, item := range bl {
+		blJSON = append(blJSON, gin.H{
+			"type": item.Type, "value": item.Value, "note": item.Note,
+			"hits": item.Hits, "auto_added": item.AutoAdded, "enabled": item.Enabled,
+		})
+	}
+	wlJSON := make([]gin.H, 0, len(wl))
+	for _, item := range wl {
+		wlJSON = append(wlJSON, gin.H{
+			"type": item.Type, "value": item.Value, "note": item.Note, "enabled": item.Enabled,
+		})
 	}
 
-	filterWL := []gin.H{}
-	wlrows, _ := db.DB.Query(`SELECT type,value,note,enabled FROM filter_whitelist ORDER BY id`)
-	if wlrows != nil {
-		for wlrows.Next() {
-			var typ, value, note string
-			var enabled int64
-			wlrows.Scan(&typ, &value, &note, &enabled)
-			filterWL = append(filterWL, gin.H{
-				"type": typ, "value": value, "note": note, "enabled": enabled,
-			})
-		}
-		wlrows.Close()
-	}
-
-	upsertSyncNode(fromAddr, "", "filter")
+	upsertSyncNode(fromAddr, masterMD5, "filter")
 
 	util.OK(c, gin.H{
-		"is_incremental":   false,
+		"match":            false,
+		"master_md5":       masterMD5,
 		"generated_at":     time.Now().Format(time.RFC3339),
-		"filter_blacklist": filterBL,
-		"filter_whitelist": filterWL,
+		"filter_blacklist": blJSON,
+		"filter_whitelist": wlJSON,
 	})
 }
 
-// ── 触发接口 ───────────────────────────────────────────────────────
+// ── 触发接口 ──────────────────────────────────────────────────────────────────
 
 func TriggerRulesSync(c *gin.Context) {
 	engine.TriggerRulesSync()
@@ -569,7 +475,7 @@ func TriggerFilterSync(c *gin.Context) {
 	util.OK(c, gin.H{"msg": "已触发黑名单同步"})
 }
 
-// ── 从节点管理 ────────────────────────────────────────────────────
+// ── 从节点管理 ────────────────────────────────────────────────────────────────
 
 func ListSyncNodes(c *gin.Context) {
 	rows, _ := db.DB.Query(`SELECT id,name,address,
@@ -623,11 +529,4 @@ func DeleteSyncNode(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	db.DB.Exec(`DELETE FROM sync_nodes WHERE id=?`, id)
 	util.OK(c, nil)
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

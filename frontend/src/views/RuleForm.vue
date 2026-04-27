@@ -99,7 +99,7 @@
             <template #default="{row}"><el-input v-model="row.address" size="small" placeholder="IP 或域名" /></template>
           </el-table-column>
           <el-table-column label="端口" width="120">
-            <template #default="{row}"><el-input-number v-model="row.port" size="small" :min="1" :max="65535" style="width:100px" /></template>
+            <template #default="{row}"><el-input-number v-model="row.port" size="small" :min="1" :max="65535" :controls="false" placeholder="端口" style="width:100px" /></template>
           </el-table-column>
           <el-table-column label="权重" width="120">
             <template #default="{row}"><el-input-number v-model="row.weight" size="small" :min="1" :max="100" style="width:100px" /></template>
@@ -167,11 +167,11 @@ const form = ref({
   lb_method: 'round_robin',
   hc_enabled: 1, hc_interval: 10, hc_timeout: 3, hc_path: '/',
   hc_rise: 2, hc_fall: 3, log_max_size: '5M', custom_config: '',
-  servers: [{ address: '', port: 80, weight: 1, state: 'up' }]
+  servers: [{ address: '', port: null, weight: 1, state: 'up' }]
 })
 
 function addServer() {
-  form.value.servers.push({ address: '', port: 80, weight: 1, state: 'up' })
+  form.value.servers.push({ address: '', port: null, weight: 1, state: 'up' })
 }
 
 // mode → form.protocol + form.https_enabled
@@ -199,6 +199,7 @@ async function submit() {
   if (!form.value.name) return ElMessage.warning('请输入规则名称')
   if (form.value.servers.length === 0) return ElMessage.warning('至少一个后端节点')
   if (form.value.servers.some(s => !s.address)) return ElMessage.warning('节点地址不能为空')
+  if (form.value.servers.some(s => !s.port)) return ElMessage.warning('节点端口不能为空')
 
   modeToForm()
   const payload = { ...form.value }

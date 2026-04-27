@@ -20,7 +20,30 @@ type worker struct {
 var (
 	mu      sync.Mutex
 	workers = map[int64]*worker{}
+
+	// 下线通知冷却：同一节点 1 小时内只发一次，恢复时立即发并清除冷却
+	notifyMu      sync.Mutex
+	notifyDownAt  = map[int64]time.Time{} // key: server ID
 )
+
+const notifyDownCooldown = time.Hour
+
+func canNotifyDown(serverID int64) bool {
+	notifyMu.Lock()
+	defer notifyMu.Unlock()
+	last, ok := notifyDownAt[serverID]
+	if !ok || time.Since(last) >= notifyDownCooldown {
+		notifyDownAt[serverID] = time.Now()
+		return true
+	}
+	return false
+}
+
+func clearNotifyDown(serverID int64) {
+	notifyMu.Lock()
+	delete(notifyDownAt, serverID)
+	notifyMu.Unlock()
+}
 
 // 启动/重启某规则的 worker
 func RestartRule(ruleID int64) {
@@ -113,6 +136,7 @@ func checkOnce(ruleID int64) {
 				db.AsyncExec(`INSERT INTO health_check_logs(server_id,rule_id,state,latency_ms,message) VALUES(?,?,?,?,?)`,
 					s.ID, r.ID, "up", res.Latency, "recovered")
 				log.Printf("[health] rule=%d server=%s:%d RECOVERED", r.ID, s.Address, s.Port)
+				clearNotifyDown(s.ID)
 				go engine.SendNotify("notify_server_up",
 					fmt.Sprintf("节点恢复 — %s:%d", s.Address, s.Port),
 					fmt.Sprintf("规则：%s\n节点：%s:%d\n延迟：%dms\n时间：%s",
@@ -129,10 +153,12 @@ func checkOnce(ruleID int64) {
 				db.AsyncExec(`INSERT INTO health_check_logs(server_id,rule_id,state,latency_ms,message) VALUES(?,?,?,?,?)`,
 					s.ID, r.ID, "down", res.Latency, res.Err)
 				log.Printf("[health] rule=%d server=%s:%d DOWN: %s", r.ID, s.Address, s.Port, res.Err)
-				go engine.SendNotify("notify_server_down",
-					fmt.Sprintf("节点下线 — %s:%d", s.Address, s.Port),
-					fmt.Sprintf("规则：%s\n节点：%s:%d\n错误：%s\n时间：%s",
-						r.Name, s.Address, s.Port, res.Err, now))
+				if canNotifyDown(s.ID) {
+					go engine.SendNotify("notify_server_down",
+						fmt.Sprintf("节点下线 — %s:%d", s.Address, s.Port),
+						fmt.Sprintf("规则：%s\n节点：%s:%d\n错误：%s\n时间：%s",
+							r.Name, s.Address, s.Port, res.Err, now))
+				}
 			}
 			db.AsyncExec(`UPDATE upstream_servers SET state=?,fail_count=?,success_count=?,last_check_at=?,last_err=? WHERE id=?`,
 				s.State, newFail, newSuccess, now, res.Err, s.ID)

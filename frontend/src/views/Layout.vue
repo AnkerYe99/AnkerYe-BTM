@@ -5,7 +5,7 @@
       :class="['sidebar', { 'sidebar-open': sideOpen || !isMobile }]">
       <div class="logo">
         <el-icon :size="22" color="#409EFF"><Promotion /></el-icon>
-        <span>AnkerYe</span>
+        <span>AnkerYe-BTM</span>
       </div>
       <el-menu :default-active="$route.path" router @select="isMobile && (sideOpen=false)">
         <el-menu-item index="/dashboard"><el-icon><DataAnalysis/></el-icon><span>总览</span></el-menu-item>
@@ -84,6 +84,7 @@ const IDLE_TIMEOUT = 30 * 60 * 1000
 
 const router = useRouter()
 const username = ref(localStorage.getItem('username') || 'admin')
+const siteTitle = ref('')
 const sideOpen = ref(false)
 const isMobile = ref(false)
 
@@ -137,6 +138,7 @@ function startIdleCheck() {
 }
 
 onMounted(() => {
+  document.title = 'AnkerYe-BTM'
   checkMobile()
   window.addEventListener('resize', checkMobile)
   window.addEventListener('mousemove', onActivity)
