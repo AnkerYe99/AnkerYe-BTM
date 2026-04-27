@@ -376,7 +376,10 @@ function uptime(s) {
   return d ? `${d}天${h}时${m}分` : `${h}时${m}分`
 }
 
-onMounted(() => { load(); timer = setInterval(load, 15000) })
+onMounted(() => {
+  // 延迟 200ms：让浏览器先完成 JS/CSS 资源加载，释放 HTTP/1.1 连接后再发 API 请求
+  setTimeout(() => { load(); timer = setInterval(load, 15000) }, 200)
+})
 onUnmounted(() => clearInterval(timer))
 </script>
 

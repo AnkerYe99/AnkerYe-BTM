@@ -152,17 +152,25 @@ func main() {
 	fileServer := http.FileServer(http.FS(distFS))
 	r.NoRoute(func(c *gin.Context) {
 		urlPath := strings.TrimPrefix(c.Request.URL.Path, "/")
-		// 根路径或文件不存在 → 直接输出 index.html 内容（避免重定向死循环）
+		// 根路径或文件不存在 → 直接输出 index.html（no-cache，确保始终拿到最新版本）
 		if urlPath == "" {
+			c.Header("Cache-Control", "no-cache")
 			data, _ := fs.ReadFile(distFS, "index.html")
 			c.Data(http.StatusOK, "text/html; charset=utf-8", data)
 			return
 		}
 		_, err := fs.Stat(distFS, urlPath)
 		if err != nil {
+			c.Header("Cache-Control", "no-cache")
 			data, _ := fs.ReadFile(distFS, "index.html")
 			c.Data(http.StatusOK, "text/html; charset=utf-8", data)
 			return
+		}
+		// /assets/ 下的文件名含 hash，永久缓存；其余文件 no-cache
+		if strings.HasPrefix(c.Request.URL.Path, "/assets/") {
+			c.Header("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			c.Header("Cache-Control", "no-cache")
 		}
 		fileServer.ServeHTTP(c.Writer, c.Request)
 	})
