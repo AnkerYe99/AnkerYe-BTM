@@ -20,8 +20,14 @@ INSTALL_DIR="/opt/AnkerYe-BTM"
 DATA_DIR="$INSTALL_DIR/data"
 LOG_DIR="/var/log/AnkerYe-BTM"
 SERVICE_NAME="AnkerYe-BTM"
-BIN_NAME="ankerye-flow-server"
 PORT="${BTM_PORT:-9000}"
+
+# 自动识别架构
+ARCH=$(uname -m)
+case "$ARCH" in
+  aarch64|arm64) BIN_NAME="ankerye-flow-server-arm64" ;;
+  *)             BIN_NAME="ankerye-flow-server" ;;
+esac
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[✓]${NC} $*"; }
@@ -131,10 +137,10 @@ if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
   systemctl stop "$SERVICE_NAME"
 fi
 mkdir -p "$DATA_DIR" "$LOG_DIR"
-cp "$DL_TMP" "$INSTALL_DIR/$BIN_NAME"
+cp "$DL_TMP" "$INSTALL_DIR/ankerye-flow-server"
 rm -f "$DL_TMP"
-chmod +x "$INSTALL_DIR/$BIN_NAME"
-info "二进制已安装到 $INSTALL_DIR/$BIN_NAME"
+chmod +x "$INSTALL_DIR/ankerye-flow-server"
+info "二进制已安装到 $INSTALL_DIR/ankerye-flow-server"
 
 # ── 生成配置 ────────────────────────────────────────────────
 if [[ ! -f "$INSTALL_DIR/config.yaml" ]]; then
