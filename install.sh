@@ -26,7 +26,8 @@ PORT="${BTM_PORT:-9000}"
 ARCH=$(uname -m)
 case "$ARCH" in
   aarch64|arm64) BIN_NAME="ankerye-flow-server-arm64" ;;
-  *)             BIN_NAME="ankerye-flow-server" ;;
+  x86_64)        BIN_NAME="ankerye-flow-server-amd64" ;;
+  *)             error "不支持的架构: $ARCH（仅支持 x86_64 / aarch64）" ;;
 esac
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
@@ -237,7 +238,7 @@ After=network.target nginx.service
 Type=simple
 User=root
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/$BIN_NAME -config $INSTALL_DIR/config.yaml
+ExecStart=$INSTALL_DIR/ankerye-flow-server -config $INSTALL_DIR/config.yaml
 Restart=on-failure
 RestartSec=5
 Environment=TZ=Asia/Shanghai
