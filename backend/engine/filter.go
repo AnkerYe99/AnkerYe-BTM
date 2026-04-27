@@ -235,7 +235,48 @@ func matchNginxPattern(pattern, value string) bool {
 
 // parseTriggerReason 查询黑名单规则，返回触发原因描述
 func parseTriggerReason(line string) string {
+	parts := strings.Fields(line)
+	var srcIP string
+	if len(parts) > 0 {
+		srcIP = parts[0]
+	}
 	method, path, ua := parseLogFields(line)
+
+	// 检查 IP 精确匹配
+	if srcIP != "" {
+		rows, _ := db.DB.Query(`SELECT value FROM filter_blacklist WHERE type='ip' AND enabled=1`)
+		if rows != nil {
+			for rows.Next() {
+				var v string
+				rows.Scan(&v)
+				if v == srcIP {
+					rows.Close()
+					return fmt.Sprintf("触发：ip %s", v)
+				}
+			}
+			rows.Close()
+		}
+	}
+
+	// 检查 CIDR 包含
+	if srcIP != "" {
+		ip := net.ParseIP(srcIP)
+		if ip != nil {
+			rows, _ := db.DB.Query(`SELECT value FROM filter_blacklist WHERE type='cidr' AND enabled=1`)
+			if rows != nil {
+				for rows.Next() {
+					var v string
+					rows.Scan(&v)
+					_, cidr, err := net.ParseCIDR(v)
+					if err == nil && cidr.Contains(ip) {
+						rows.Close()
+						return fmt.Sprintf("触发：cidr %s", v)
+					}
+				}
+				rows.Close()
+			}
+		}
+	}
 
 	// 检查 method
 	if method != "" {
