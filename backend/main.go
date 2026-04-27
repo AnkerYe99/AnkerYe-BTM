@@ -1,6 +1,7 @@
 package main
 
 import (
+	"compress/gzip"
 	"embed"
 	"flag"
 	"fmt"
@@ -57,6 +58,7 @@ func main() {
 
 	r := gin.Default()
 	r.Use(corsMiddleware())
+	r.Use(gzipMiddleware())
 
 	// SSE（无需 JWT，通过 ?token= 鉴权）
 	r.GET("/api/v1/rules/:id/logs/stream", handler.StreamRuleLogs)
@@ -194,6 +196,36 @@ func startCertAutoRenew() {
 		log.Println("[cert] running auto-renew check")
 		engine.AutoRenewCheck()
 	}
+}
+
+func gzipMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !strings.Contains(c.Request.Header.Get("Accept-Encoding"), "gzip") {
+			c.Next()
+			return
+		}
+		ext := strings.ToLower(c.Request.URL.Path)
+		if !strings.HasSuffix(ext, ".js") && !strings.HasSuffix(ext, ".css") &&
+			!strings.HasSuffix(ext, ".json") && !strings.HasSuffix(ext, ".svg") {
+			c.Next()
+			return
+		}
+		c.Header("Content-Encoding", "gzip")
+		c.Header("Vary", "Accept-Encoding")
+		gz, _ := gzip.NewWriterLevel(c.Writer, gzip.BestSpeed)
+		defer gz.Close()
+		c.Writer = &gzipWriter{ResponseWriter: c.Writer, gz: gz}
+		c.Next()
+	}
+}
+
+type gzipWriter struct {
+	gin.ResponseWriter
+	gz *gzip.Writer
+}
+
+func (g *gzipWriter) Write(b []byte) (int, error) {
+	return g.gz.Write(b)
 }
 
 func corsMiddleware() gin.HandlerFunc {
