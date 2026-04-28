@@ -84,7 +84,6 @@ const IDLE_TIMEOUT = 30 * 60 * 1000
 
 const router = useRouter()
 const username = ref(localStorage.getItem('username') || 'admin')
-const siteTitle = ref('')
 const sideOpen = ref(false)
 const isMobile = ref(false)
 
