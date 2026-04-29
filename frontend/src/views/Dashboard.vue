@@ -235,6 +235,7 @@ const traffic      = ref([])
 const traffic24h   = ref([])
 const loading      = ref(false)
 let timer = null
+let initDelay = null
 
 async function load() {
   loading.value = true
@@ -378,9 +379,9 @@ function uptime(s) {
 
 onMounted(() => {
   // 延迟 200ms：让浏览器先完成 JS/CSS 资源加载，释放 HTTP/1.1 连接后再发 API 请求
-  setTimeout(() => { load(); timer = setInterval(load, 15000) }, 200)
+  initDelay = setTimeout(() => { load(); timer = setInterval(load, 15000) }, 200)
 })
-onUnmounted(() => clearInterval(timer))
+onUnmounted(() => { clearTimeout(initDelay); clearInterval(timer) })
 </script>
 
 <style scoped>

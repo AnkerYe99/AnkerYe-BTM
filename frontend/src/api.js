@@ -19,6 +19,8 @@ api.interceptors.request.use(cfg => {
   return cfg
 })
 
+let _redirecting401 = false
+
 api.interceptors.response.use(
   res => {
     if (res.data && res.data.code !== undefined && res.data.code !== 0) {
@@ -31,8 +33,11 @@ api.interceptors.response.use(
     if (err.response && err.response.status === 401) {
       localStorage.removeItem('token')
       localStorage.removeItem('lastActivity')
-      router.push('/login')
-      ElMessage.error('登录已过期，请重新登录')
+      if (!_redirecting401) {
+        _redirecting401 = true
+        ElMessage.error('登录已过期，请重新登录')
+        router.push('/login').finally(() => { _redirecting401 = false })
+      }
     } else {
       ElMessage.error(err.response?.data?.msg || err.message || '网络错误')
     }

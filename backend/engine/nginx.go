@@ -369,7 +369,9 @@ func ApplyRule(ruleID int64) error {
 		return fmt.Errorf("加载规则失败: %w", err)
 	}
 	if r.Status != 1 {
-		removeRuleFiles(r.ID, r.Protocol)
+		// 清理两种协议的 conf 文件（防止协议切换后残留）
+		os.Remove(filepath.Join(config.Global.Nginx.ConfDir, fmt.Sprintf("%d-http.conf", r.ID)))
+		os.Remove(filepath.Join(config.Global.Nginx.ConfDir, fmt.Sprintf("%d-stream.conf", r.ID)))
 		SyncPortDefaults()
 		return Reload()
 	}
@@ -378,6 +380,16 @@ func ApplyRule(ruleID int64) error {
 		return err
 	}
 	path := ruleFilePath(r.ID, r.Protocol)
+
+	// 清理另一种协议的旧 conf 文件（处理 http↔tcp 协议切换）
+	var oldPath string
+	switch r.Protocol {
+	case "http", "https":
+		oldPath = filepath.Join(config.Global.Nginx.ConfDir, fmt.Sprintf("%d-stream.conf", r.ID))
+	default:
+		oldPath = filepath.Join(config.Global.Nginx.ConfDir, fmt.Sprintf("%d-http.conf", r.ID))
+	}
+	os.Remove(oldPath)
 
 	// 原子写入
 	tmp := path + ".tmp"

@@ -148,6 +148,10 @@ func StartAutoBlockWorker() {
 
 func tailLog(logFile string) {
 	var offset int64
+	stateKey := "filter::" + logFile
+	// 从 DB 恢复上次读取位置，避免服务重启后重新处理历史日志
+	db.DB.QueryRow(`SELECT offset FROM log_parse_state WHERE log_file=?`, stateKey).Scan(&offset)
+
 	for {
 		f, err := os.Open(logFile)
 		if err != nil {
@@ -163,8 +167,14 @@ func tailLog(logFile string) {
 		for scanner.Scan() {
 			processAutoBlock(scanner.Text())
 		}
-		offset, _ = f.Seek(0, 1)
+		newOffset, _ := f.Seek(0, 1)
 		f.Close()
+		if newOffset != offset {
+			offset = newOffset
+			db.DB.Exec(`INSERT INTO log_parse_state(log_file,inode,offset) VALUES(?,0,?)
+				ON CONFLICT(log_file) DO UPDATE SET offset=excluded.offset`,
+				stateKey, offset)
+		}
 		time.Sleep(300 * time.Millisecond)
 	}
 }
@@ -181,6 +191,10 @@ func processAutoBlock(line string) {
 	if net.ParseIP(ip) == nil {
 		return
 	}
+	// 白名单 IP 不自动封锁
+	if isIPWhitelisted(ip) {
+		return
+	}
 	note := "自动封锁（" + parseTriggerReason(line) + "）"
 	res, err := db.DB.Exec(
 		`INSERT OR IGNORE INTO filter_blacklist(type,value,note,auto_added) VALUES(?,?,?,1)`,
@@ -193,6 +207,32 @@ func processAutoBlock(line string) {
 		log.Printf("[filter] auto-blocked IP: %s | %s", ip, note)
 		go ApplyFilter()
 	}
+}
+
+func isIPWhitelisted(ip string) bool {
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		return false
+	}
+	var count int
+	db.DB.QueryRow(`SELECT COUNT(*) FROM filter_whitelist WHERE type='ip' AND value=? AND enabled=1`, ip).Scan(&count)
+	if count > 0 {
+		return true
+	}
+	rows, _ := db.DB.Query(`SELECT value FROM filter_whitelist WHERE type='cidr' AND enabled=1`)
+	if rows == nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var v string
+		rows.Scan(&v)
+		_, cidr, err := net.ParseCIDR(v)
+		if err == nil && cidr.Contains(parsedIP) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseLogFields 从 nginx 日志行中解析 method、path、ua
