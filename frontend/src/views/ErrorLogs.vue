@@ -57,36 +57,32 @@
 
     <!-- 表格 -->
     <el-card shadow="never" class="table-card" v-loading="loading">
-      <el-table :data="pagedList" stripe size="small" style="width:100%" :row-class-name="rowClass">
-        <el-table-column label="规则" prop="rule_name" width="130" show-overflow-tooltip fixed />
-        <el-table-column label="客户端 IP" width="200">
+      <el-table :data="pagedList" stripe size="small" style="width:100%" :row-class-name="rowClass" table-layout="fixed">
+        <el-table-column label="规则" prop="rule_name" min-width="100" show-overflow-tooltip fixed />
+        <el-table-column label="客户端 IP / 归属地" min-width="190">
           <template #default="{row}">
             <span>{{ row.ip }}</span>
             <span v-if="row.location" style="color:#909399;font-size:11px;margin-left:3px">/{{ row.location }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="方法" prop="method" width="70">
+        <el-table-column label="方法" width="72">
           <template #default="{row}">
             <el-tag size="small" :type="methodType(row.method)" effect="plain">{{ row.method }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="请求路径" prop="path" min-width="220" show-overflow-tooltip />
-        <el-table-column label="状态码" prop="status" width="90">
+        <el-table-column label="请求路径" prop="path" min-width="200" show-overflow-tooltip />
+        <el-table-column label="状态" width="76">
           <template #default="{row}">
-            <el-tag v-if="row.status===444" type="danger" size="small" effect="dark" style="font-weight:700;letter-spacing:1px">
-              拦截
-            </el-tag>
-            <el-tag v-else :type="row.status>=500?'danger':'warning'" size="small" effect="dark">
-              {{ row.status }}
-            </el-tag>
+            <el-tag v-if="row.status===444" type="danger" size="small" effect="dark" style="font-weight:700;letter-spacing:1px">拦截</el-tag>
+            <el-tag v-else :type="row.status>=500?'danger':'warning'" size="small" effect="dark">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="大小" width="80">
+        <el-table-column label="大小" width="72">
           <template #default="{row}">{{ fmtBytes(row.bytes) }}</template>
         </el-table-column>
-        <el-table-column label="上游节点" prop="upstream" width="165" show-overflow-tooltip />
-        <el-table-column label="时间" prop="time" width="155" />
-        <el-table-column label="User-Agent" prop="ua" min-width="180" show-overflow-tooltip />
+        <el-table-column label="上游节点" prop="upstream" min-width="148" show-overflow-tooltip />
+        <el-table-column label="时间" prop="time" width="152" />
+        <el-table-column label="User-Agent" prop="ua" min-width="200" show-overflow-tooltip />
       </el-table>
 
       <div v-if="!loading && filteredList.length === 0" class="empty-hint">
