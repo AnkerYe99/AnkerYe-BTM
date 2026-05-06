@@ -23,6 +23,7 @@ type Rule struct {
 	HCFall       int            `json:"hc_fall"`
 	LogMaxSize   string         `json:"log_max_size"`
 	CustomConfig string         `json:"custom_config"`
+	CaptureBody  int            `json:"capture_body"`
 	Status       int            `json:"status"`
 	CreatedAt    string         `json:"created_at"`
 	UpdatedAt    string         `json:"updated_at"`

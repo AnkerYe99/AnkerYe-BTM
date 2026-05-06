@@ -120,6 +120,7 @@ func main() {
 		auth.GET("/stats/server_health", handler.ServerHealth)
 		auth.GET("/stats/errors", handler.ListErrorLogs)
 		auth.GET("/rules/simple", handler.ListRulesSimple)
+		auth.GET("/rules/:id/capture", handler.ListCapture)
 
 		auth.GET("/update/check", handler.CheckUpdate)
 		auth.POST("/update/apply", handler.ApplyUpdate)

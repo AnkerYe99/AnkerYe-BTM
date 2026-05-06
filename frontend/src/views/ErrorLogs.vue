@@ -82,6 +82,17 @@
           <template #default="{row}">{{ fmtBytes(row.bytes) }}</template>
         </el-table-column>
         <el-table-column label="上游节点" prop="upstream" min-width="148" show-overflow-tooltip />
+        <el-table-column label="耗时" min-width="120">
+          <template #default="{row}">
+            <span v-if="row.request_time" :style="{color: parseFloat(row.request_time)>3?'#f56c6c':parseFloat(row.request_time)>1?'#e6a23c':'#67c23a'}">
+              {{ fmtTime(row.request_time) }}
+            </span>
+            <span v-else style="color:#ccc">—</span>
+            <span v-if="row.upstream_time && row.upstream_time !== '-'" style="color:#909399;font-size:11px;margin-left:4px">
+              up:{{ fmtTime(row.upstream_time) }}
+            </span>
+          </template>
+        </el-table-column>
         <el-table-column label="时间" prop="time" width="152" />
         <el-table-column label="User-Agent" prop="ua" min-width="200" show-overflow-tooltip />
       </el-table>
@@ -186,6 +197,15 @@ function fmtBytes(b) {
   if (b < 1024) return b + 'B'
   if (b < 1024 * 1024) return (b / 1024).toFixed(1) + 'K'
   return (b / 1024 / 1024).toFixed(1) + 'M'
+}
+
+function fmtTime(t) {
+  if (!t || t === '-') return '—'
+  const v = parseFloat(t)
+  if (isNaN(v)) return t
+  if (v < 0.001) return (v * 1000000).toFixed(0) + 'µs'
+  if (v < 1) return (v * 1000).toFixed(0) + 'ms'
+  return v.toFixed(2) + 's'
 }
 
 onMounted(async () => { await loadRules(); await load() })

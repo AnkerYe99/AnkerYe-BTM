@@ -18,7 +18,7 @@ import (
 )
 
 var reAccessLog = regexp.MustCompile(
-	`^(\S+) - \S+ \[(\d{2}/\w+/\d{4}):(\d{2}:\d{2}:\d{2}) [+-]\d{4}\] "([^"]*)" (\d{3}) (\d+) "[^"]*" "([^"]*)" (\S+)`)
+	`^(\S+) - \S+ \[(\d{2}/\w+/\d{4}):(\d{2}:\d{2}:\d{2}) [+-]\d{4}\] "([^"]*)" (\d{3}) (\d+) "[^"]*" "([^"]*)" (\S+)(?: (\S+) (\S+))?`)
 
 var logMonthMap = map[string]string{
 	"Jan": "01", "Feb": "02", "Mar": "03", "Apr": "04",
@@ -27,17 +27,19 @@ var logMonthMap = map[string]string{
 }
 
 type errorLogEntry struct {
-	Time     string `json:"time"`
-	RuleID   int64  `json:"rule_id"`
-	RuleName string `json:"rule_name"`
-	IP       string `json:"ip"`
-	Location string `json:"location"`
-	Method   string `json:"method"`
-	Path     string `json:"path"`
-	Status   int    `json:"status"`
-	Bytes    int64  `json:"bytes"`
-	UA       string `json:"ua"`
-	Upstream string `json:"upstream"`
+	Time         string `json:"time"`
+	RuleID       int64  `json:"rule_id"`
+	RuleName     string `json:"rule_name"`
+	IP           string `json:"ip"`
+	Location     string `json:"location"`
+	Method       string `json:"method"`
+	Path         string `json:"path"`
+	Status       int    `json:"status"`
+	Bytes        int64  `json:"bytes"`
+	UA           string `json:"ua"`
+	Upstream     string `json:"upstream"`
+	RequestTime  string `json:"request_time"`  // 总耗时（秒，含 decimal）
+	UpstreamTime string `json:"upstream_time"` // upstream 响应耗时
 }
 
 func nginxTimeToISO(date, t string) string {
@@ -210,18 +212,25 @@ func ListErrorLogs(c *gin.Context) {
 				path = parts[1]
 			}
 
+			reqTime, upTime := "", ""
+			if len(m) >= 11 {
+				reqTime = m[9]
+				upTime = m[10]
+			}
 			entries = append(entries, errorLogEntry{
-				Time:     nginxTimeToISO(m[2], m[3]),
-				RuleID:   r.id,
-				RuleName: r.name,
-				IP:       m[1],
-				Location: util.LookupIP(m[1]),
-				Method:   method,
-				Path:     path,
-				Status:   status,
-				Bytes:    bytes,
-				UA:       m[7],
-				Upstream: m[8],
+				Time:         nginxTimeToISO(m[2], m[3]),
+				RuleID:       r.id,
+				RuleName:     r.name,
+				IP:           m[1],
+				Location:     util.LookupIP(m[1]),
+				Method:       method,
+				Path:         path,
+				Status:       status,
+				Bytes:        bytes,
+				UA:           m[7],
+				Upstream:     m[8],
+				RequestTime:  reqTime,
+				UpstreamTime: upTime,
 			})
 		}
 	}

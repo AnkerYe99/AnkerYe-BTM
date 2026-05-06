@@ -298,6 +298,10 @@ var versionedMigrations = []struct {
 				WHERE deleted_at < datetime('now', '-30 days', 'localtime');
 			END`,
 	}},
+	{5, "add_request_capture", []string{
+		// 规则级开关：是否记录请求体（POST body）到独立 capture log，用于回放/测试数据
+		`ALTER TABLE rules ADD COLUMN capture_body INTEGER DEFAULT 0`,
+	}},
 }
 
 func migrate() error {

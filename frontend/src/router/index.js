@@ -16,6 +16,7 @@ const routes = [
       { path: 'certs', name: 'certs', component: () => import('../views/Certs.vue') },
       { path: 'traffic', name: 'traffic', component: () => import('../views/Traffic.vue') },
       { path: 'errorlogs', name: 'errorlogs', component: () => import('../views/ErrorLogs.vue') },
+      { path: 'capture', name: 'capture', component: () => import('../views/Capture.vue') },
       { path: 'sync', name: 'sync', component: () => import('../views/SyncNodes.vue') },
       { path: 'filter', redirect: '/blacklist' },
       { path: 'blacklist', name: 'blacklist', component: () => import('../views/BlackList.vue') },

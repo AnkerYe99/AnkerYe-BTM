@@ -58,12 +58,12 @@ func LoadRule(ruleID int64) (*model.Rule, error) {
 	row := db.DB.QueryRow(`SELECT id,name,protocol,listen_port,IFNULL(listen_stack,'both'),
 		https_enabled,https_port,server_name,lb_method,ssl_cert_id,ssl_redirect,
 		hc_enabled,hc_interval,hc_timeout,hc_path,hc_rise,hc_fall,
-		log_max_size,custom_config,status,created_at,updated_at
+		log_max_size,custom_config,IFNULL(capture_body,0),status,created_at,updated_at
 		FROM rules WHERE id=?`, ruleID)
 	err := row.Scan(&r.ID, &r.Name, &r.Protocol, &r.ListenPort, &stack,
 		&r.HTTPSEnabled, &httpsPort, &r.ServerName, &r.LBMethod,
 		&certID, &r.SSLRedirect, &r.HCEnabled, &r.HCInterval, &r.HCTimeout, &r.HCPath,
-		&r.HCRise, &r.HCFall, &r.LogMaxSize, &r.CustomConfig, &r.Status, &r.CreatedAt, &r.UpdatedAt)
+		&r.HCRise, &r.HCFall, &r.LogMaxSize, &r.CustomConfig, &r.CaptureBody, &r.Status, &r.CreatedAt, &r.UpdatedAt)
 	if stack.Valid {
 		r.ListenStack = stack.String
 	}
@@ -181,6 +181,9 @@ func renderHTTP(r *model.Rule, servers []model.Server) string {
 		sb.WriteString(renderListen(r.ListenStack, r.ListenPort, ""))
 		sb.WriteString(fmt.Sprintf("    server_name %s;\n", sn))
 		sb.WriteString(fmt.Sprintf("    access_log %s/rule_%d_access.log ankerye_flow;\n", config.Global.Nginx.LogDir, r.ID))
+		if r.CaptureBody == 1 {
+			sb.WriteString(fmt.Sprintf("    access_log %s/rule_%d_capture.log ankerye_capture;\n", config.Global.Nginx.LogDir, r.ID))
+		}
 		sb.WriteString(fmt.Sprintf("    error_log  %s/rule_%d_error.log warn;\n", config.Global.Nginx.LogDir, r.ID))
 
 		sb.WriteString(filterCheckBlock())
@@ -210,6 +213,9 @@ func renderHTTP(r *model.Rule, servers []model.Server) string {
 		sb.WriteString("    ssl_ciphers HIGH:!aNULL:!MD5;\n")
 		sb.WriteString("    ssl_session_cache shared:SSL:10m;\n")
 		sb.WriteString(fmt.Sprintf("    access_log %s/rule_%d_access.log ankerye_flow;\n", config.Global.Nginx.LogDir, r.ID))
+		if r.CaptureBody == 1 {
+			sb.WriteString(fmt.Sprintf("    access_log %s/rule_%d_capture.log ankerye_capture;\n", config.Global.Nginx.LogDir, r.ID))
+		}
 		sb.WriteString(fmt.Sprintf("    error_log  %s/rule_%d_error.log warn;\n", config.Global.Nginx.LogDir, r.ID))
 		sb.WriteString(filterCheckBlock())
 		sb.WriteString(proxyBlock(r.ID))

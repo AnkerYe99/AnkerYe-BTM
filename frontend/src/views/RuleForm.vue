@@ -121,6 +121,13 @@
         <el-button size="small" icon="Plus" @click="addServer" style="margin-top:8px">添加节点</el-button>
 
         <el-divider>高级</el-divider>
+        <el-form-item label="记录请求体">
+          <el-switch v-model="form.capture_body" :active-value="1" :inactive-value="0" />
+          <span style="margin-left:12px;color:#999;font-size:12px">
+            开启后将 POST 请求体（含 body）写到 <code>rule_X_capture.log</code>，可在「请求捕获」页查看，用于调试 / 测试数据回放。
+            <strong style="color:#e6a23c">注意：会包含敏感字段（密码 / token），仅在调试时启用</strong>
+          </span>
+        </el-form-item>
         <el-form-item label="自定义指令">
           <el-input v-model="form.custom_config" type="textarea" :rows="3" placeholder="直接追加到 nginx 配置中（高级用户）" />
         </el-form-item>
@@ -167,6 +174,7 @@ const form = ref({
   lb_method: 'round_robin',
   hc_enabled: 1, hc_interval: 10, hc_timeout: 3, hc_path: '/',
   hc_rise: 2, hc_fall: 3, log_max_size: '5M', custom_config: '',
+  capture_body: 0,
   servers: [{ address: '', port: null, weight: 1, state: 'up' }]
 })
 
