@@ -182,7 +182,7 @@ func renderHTTP(r *model.Rule, servers []model.Server) string {
 		sb.WriteString(fmt.Sprintf("    server_name %s;\n", sn))
 		sb.WriteString(fmt.Sprintf("    access_log %s/rule_%d_access.log ankerye_flow;\n", config.Global.Nginx.LogDir, r.ID))
 		if r.CaptureBody == 1 {
-			sb.WriteString(fmt.Sprintf("    access_log %s/rule_%d_capture.log ankerye_capture;\n", config.Global.Nginx.LogDir, r.ID))
+			sb.WriteString(fmt.Sprintf("    access_log %s/rule_%d_capture.log ankerye_capture if=$__nf_do_capture;\n", config.Global.Nginx.LogDir, r.ID))
 		}
 		sb.WriteString(fmt.Sprintf("    error_log  %s/rule_%d_error.log warn;\n", config.Global.Nginx.LogDir, r.ID))
 
@@ -214,7 +214,7 @@ func renderHTTP(r *model.Rule, servers []model.Server) string {
 		sb.WriteString("    ssl_session_cache shared:SSL:10m;\n")
 		sb.WriteString(fmt.Sprintf("    access_log %s/rule_%d_access.log ankerye_flow;\n", config.Global.Nginx.LogDir, r.ID))
 		if r.CaptureBody == 1 {
-			sb.WriteString(fmt.Sprintf("    access_log %s/rule_%d_capture.log ankerye_capture;\n", config.Global.Nginx.LogDir, r.ID))
+			sb.WriteString(fmt.Sprintf("    access_log %s/rule_%d_capture.log ankerye_capture if=$__nf_do_capture;\n", config.Global.Nginx.LogDir, r.ID))
 		}
 		sb.WriteString(fmt.Sprintf("    error_log  %s/rule_%d_error.log warn;\n", config.Global.Nginx.LogDir, r.ID))
 		sb.WriteString(filterCheckBlock())

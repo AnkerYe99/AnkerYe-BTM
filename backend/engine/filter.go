@@ -121,7 +121,10 @@ func buildFilterConf() (string, error) {
 		}
 		rows.Close()
 	}
-	sb.WriteString("}\n")
+	sb.WriteString("}\n\n")
+
+	// 被拦截时不写 capture log（$__nf_block=1 → 空字符串，access_log if= 不写入）
+	sb.WriteString("map $__nf_block $__nf_do_capture {\n    1  \"\";\n    default \"1\";\n}\n")
 
 	return sb.String(), nil
 }
