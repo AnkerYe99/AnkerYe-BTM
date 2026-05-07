@@ -1,8 +1,8 @@
 <template>
   <div>
-    <div style="display:flex;justify-content:space-between;margin-bottom:16px">
-      <h2>SSL 证书</h2>
-      <div style="display:flex;gap:8px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+      <h2 style="margin:0">SSL 证书</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
         <el-button type="success" icon="MagicStick" @click="openApply">申请证书</el-button>
         <el-button type="primary" icon="Plus" @click="openUpload">上传证书</el-button>
       </div>
@@ -11,7 +11,7 @@
       <div style="overflow-x:auto">
         <el-table :data="pagedList" size="small" table-layout="auto">
           <el-table-column prop="domain" label="域名" min-width="160" show-overflow-tooltip />
-          <el-table-column prop="expire_at" label="到期时间" min-width="156" />
+          <el-table-column v-if="!isMobile" prop="expire_at" label="到期时间" min-width="156" />
           <el-table-column label="剩余天数" min-width="92" align="center">
             <template #default="{row}">
               <el-tag :type="daysLeft(row.expire_at) < 10 ? 'danger' : 'success'" size="small">
@@ -19,7 +19,7 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="自动续签" min-width="84" align="center">
+          <el-table-column v-if="!isMobile" label="自动续签" min-width="84" align="center">
             <template #default="{row}">
               <el-switch :model-value="row.auto_renew===1" @change="toggleRenew(row,$event)" />
             </template>
@@ -31,13 +31,31 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="last_renew_at" label="最后续签" min-width="156" />
-          <el-table-column label="操作" min-width="240" fixed="right">
+          <el-table-column v-if="!isMobile" prop="last_renew_at" label="最后续签" min-width="156" />
+          <el-table-column label="操作" :min-width="isMobile ? 100 : 240" fixed="right">
             <template #default="{row}">
-              <el-button size="small" @click="openEdit(row)">编辑</el-button>
-              <el-button size="small" type="primary" @click="renew(row)">续签</el-button>
-              <el-button size="small" type="info" @click="openLog(row)">日志</el-button>
-              <el-button size="small" type="danger" @click="del(row)">删除</el-button>
+              <template v-if="isMobile">
+                <el-dropdown size="small" @command="handleCertCmd($event, row)">
+                  <el-button size="small">操作<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="edit">编辑</el-dropdown-item>
+                      <el-dropdown-item command="renew">续签</el-dropdown-item>
+                      <el-dropdown-item command="log">日志</el-dropdown-item>
+                      <el-dropdown-item command="auto_renew">
+                        {{ row.auto_renew===1 ? '关闭自动续签' : '开启自动续签' }}
+                      </el-dropdown-item>
+                      <el-dropdown-item command="del" divided style="color:#f56c6c">删除</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </template>
+              <template v-else>
+                <el-button size="small" @click="openEdit(row)">编辑</el-button>
+                <el-button size="small" type="primary" @click="renew(row)">续签</el-button>
+                <el-button size="small" type="info" @click="openLog(row)">日志</el-button>
+                <el-button size="small" type="danger" @click="del(row)">删除</el-button>
+              </template>
             </template>
           </el-table-column>
         </el-table>
@@ -46,7 +64,7 @@
     </el-card>
 
     <!-- 申请证书对话框 -->
-    <el-dialog v-model="applyShow" title="申请 SSL 证书（Let's Encrypt）" width="480px" :close-on-click-modal="false">
+    <el-dialog v-model="applyShow" title="申请 SSL 证书（Let's Encrypt）" :width="dialogWidthSm" :close-on-click-modal="false">
       <el-alert type="info" :closable="false" style="margin-bottom:16px">
         通过 DNS-01 自动申请免费证书，需在<b>系统设置</b>中配置 DNSPod 或腾讯云 DNS API 及 ACME 邮箱。
       </el-alert>
@@ -67,7 +85,7 @@
     </el-dialog>
 
     <!-- 上传证书对话框 -->
-    <el-dialog v-model="uploadShow" title="上传 SSL 证书" width="700px" :close-on-click-modal="false">
+    <el-dialog v-model="uploadShow" title="上传 SSL 证书" :width="dialogWidthLg" :close-on-click-modal="false">
       <el-alert type="info" :closable="false" style="margin-bottom:16px">
         系统将自动从证书中提取域名（SAN/CN）。证书与私钥不匹配时上传会失败。
       </el-alert>
@@ -105,7 +123,7 @@
     </el-dialog>
 
     <!-- 编辑证书对话框 -->
-    <el-dialog v-model="editShow" :title="`编辑证书 — ${editForm.domain || ''}`" width="760px" :close-on-click-modal="false">
+    <el-dialog v-model="editShow" :title="`编辑证书 — ${editForm.domain || ''}`" :width="dialogWidthLg" :close-on-click-modal="false">
       <el-alert type="warning" :closable="false" style="margin-bottom:16px">
         直接编辑证书与私钥内容，保存后将重新解析域名 / 到期时间，并写入 nginx 证书目录。
       </el-alert>
@@ -128,8 +146,8 @@
     </el-dialog>
 
     <!-- 续签日志对话框 -->
-    <el-dialog v-model="logShow" :title="`续签日志 — ${logCert?.domain}`" width="700px" @close="closeLogDialog">
-      <div style="margin-bottom:12px;display:flex;align-items:center;gap:12px">
+    <el-dialog v-model="logShow" :title="`续签日志 — ${logCert?.domain}`" :width="dialogWidthMd" @close="closeLogDialog">
+      <div style="margin-bottom:12px;display:flex;align-items:center;flex-wrap:wrap;gap:8px">
         <el-tag :type="statusTagType(logStatus)" size="small">{{ statusLabel(logStatus) }}</el-tag>
         <el-tag v-if="logStatus==='pending'" type="info" size="small" effect="plain">
           每 15 秒自动刷新
@@ -148,7 +166,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 import Pagination from '../components/Pagination.vue'
@@ -157,6 +175,12 @@ const PAGE_SIZE = 30
 const list = ref([])
 const page = ref(1)
 const pagedList = computed(() => list.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+
+const isMobile = ref(window.innerWidth < 768)
+const dialogWidthSm = computed(() => isMobile.value ? '95vw' : '480px')
+const dialogWidthMd = computed(() => isMobile.value ? '95vw' : '700px')
+const dialogWidthLg = computed(() => isMobile.value ? '95vw' : '760px')
+function _onResize() { isMobile.value = window.innerWidth < 768 }
 
 // 申请证书
 const applyShow = ref(false)
@@ -307,6 +331,14 @@ async function renew(row) {
   } catch {}
 }
 
+function handleCertCmd(cmd, row) {
+  if (cmd === 'edit') openEdit(row)
+  else if (cmd === 'renew') renew(row)
+  else if (cmd === 'log') openLog(row)
+  else if (cmd === 'auto_renew') toggleRenew(row, row.auto_renew !== 1)
+  else if (cmd === 'del') del(row)
+}
+
 async function openLog(row) {
   logCert.value = row
   logText.value = ''
@@ -347,7 +379,8 @@ function closeLogDialog() {
   stopLogPoll()
 }
 
-onMounted(load)
+onMounted(() => { load(); window.addEventListener('resize', _onResize) })
+onUnmounted(() => window.removeEventListener('resize', _onResize))
 </script>
 
 <style scoped>

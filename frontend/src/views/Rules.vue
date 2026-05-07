@@ -2,15 +2,16 @@
   <div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
       <h2 style="margin:0">转发规则</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <el-input v-model="search" placeholder="搜索名称/域名/地址" clearable style="width:220px" prefix-icon="Search" />
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <el-input v-model="search" placeholder="搜索名称/域名/地址" clearable
+          style="width:220px;min-width:120px" prefix-icon="Search" />
         <el-button type="primary" icon="Plus" @click="$router.push('/rules/new')">新建规则</el-button>
       </div>
     </div>
     <el-card>
       <div style="overflow-x:auto">
         <el-table :data="pagedList" size="small" v-loading="loading" table-layout="auto">
-          <el-table-column prop="id" label="ID" min-width="60" />
+          <el-table-column v-if="!isMobile" prop="id" label="ID" min-width="60" />
           <el-table-column prop="name" label="名称" min-width="120" show-overflow-tooltip />
           <el-table-column label="类型" min-width="70">
             <template #default="{row}">
@@ -33,9 +34,9 @@
               </span>
             </template>
           </el-table-column>
-          <el-table-column prop="server_name" label="域名" min-width="140" show-overflow-tooltip />
-          <el-table-column prop="addresses" label="后端地址" min-width="160" show-overflow-tooltip />
-          <el-table-column label="均衡算法" min-width="92">
+          <el-table-column v-if="!isMobile" prop="server_name" label="域名" min-width="140" show-overflow-tooltip />
+          <el-table-column v-if="!isMobile" prop="addresses" label="后端地址" min-width="160" show-overflow-tooltip />
+          <el-table-column v-if="!isMobile" label="均衡算法" min-width="92">
             <template #default="{row}">
               {{ lbLabel(row.lb_method) }}
             </template>
@@ -55,21 +56,39 @@
               <el-tag v-else type="info" size="small">禁用</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" min-width="200" fixed="right">
+          <el-table-column label="操作" :min-width="isMobile ? 100 : 200" fixed="right">
             <template #default="{row}">
-              <el-button size="small" @click="$router.push(`/rules/${row.id}/edit`)">编辑</el-button>
-              <el-button v-if="row.status===1" size="small" @click="toggle(row,0)">禁用</el-button>
-              <el-button v-else size="small" type="success" @click="toggle(row,1)">启用</el-button>
-              <el-dropdown size="small" @command="handleCmd($event, row)" style="margin-left:6px">
-                <el-button size="small">更多<el-icon class="el-icon--right"><ArrowDown/></el-icon></el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item command="preview">预览配置</el-dropdown-item>
-                    <el-dropdown-item command="log">实时日志</el-dropdown-item>
-                    <el-dropdown-item command="del" divided style="color:#f56c6c">删除</el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
+              <template v-if="isMobile">
+                <el-dropdown size="small" @command="handleCmd($event, row)">
+                  <el-button size="small">操作<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="edit">编辑</el-dropdown-item>
+                      <el-dropdown-item :command="row.status===1 ? 'disable' : 'enable'">
+                        {{ row.status===1 ? '禁用' : '启用' }}
+                      </el-dropdown-item>
+                      <el-dropdown-item command="preview" divided>预览配置</el-dropdown-item>
+                      <el-dropdown-item command="log">实时日志</el-dropdown-item>
+                      <el-dropdown-item command="del" divided style="color:#f56c6c">删除</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </template>
+              <template v-else>
+                <el-button size="small" @click="$router.push(`/rules/${row.id}/edit`)">编辑</el-button>
+                <el-button v-if="row.status===1" size="small" @click="toggle(row,0)">禁用</el-button>
+                <el-button v-else size="small" type="success" @click="toggle(row,1)">启用</el-button>
+                <el-dropdown size="small" @command="handleCmd($event, row)" style="margin-left:6px">
+                  <el-button size="small">更多<el-icon class="el-icon--right"><ArrowDown/></el-icon></el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="preview">预览配置</el-dropdown-item>
+                      <el-dropdown-item command="log">实时日志</el-dropdown-item>
+                      <el-dropdown-item command="del" divided style="color:#f56c6c">删除</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </template>
             </template>
           </el-table-column>
         </el-table>
@@ -77,7 +96,7 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="previewShow" title="nginx 配置预览" width="700px">
+    <el-dialog v-model="previewShow" title="nginx 配置预览" :width="dialogWidth">
       <pre class="preview">{{ previewText }}</pre>
     </el-dialog>
 
@@ -99,10 +118,13 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 import Pagination from '../components/Pagination.vue'
+
+const router = useRouter()
 
 const PAGE_SIZE = 30
 const list = ref([])
@@ -111,6 +133,10 @@ const search = ref('')
 const page = ref(1)
 const previewShow = ref(false)
 const previewText = ref('')
+
+const isMobile = ref(window.innerWidth < 768)
+const dialogWidth = computed(() => isMobile.value ? '95vw' : '700px')
+function _onResize() { isMobile.value = window.innerWidth < 768 }
 
 // 日志
 const logShow = ref(false)
@@ -138,7 +164,10 @@ const pagedList = computed(() => {
 })
 
 function handleCmd(cmd, row) {
-  if (cmd === 'preview') preview(row.id)
+  if (cmd === 'edit') router.push(`/rules/${row.id}/edit`)
+  else if (cmd === 'enable') toggle(row, 1)
+  else if (cmd === 'disable') toggle(row, 0)
+  else if (cmd === 'preview') preview(row.id)
   else if (cmd === 'log') openLog(row)
   else if (cmd === 'del') del(row)
 }
@@ -211,7 +240,8 @@ async function del(row) {
     load()
   } catch {}
 }
-onMounted(load)
+onMounted(() => { load(); window.addEventListener('resize', _onResize) })
+onUnmounted(() => window.removeEventListener('resize', _onResize))
 </script>
 
 <style scoped>
