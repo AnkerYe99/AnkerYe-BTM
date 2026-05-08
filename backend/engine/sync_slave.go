@@ -535,7 +535,7 @@ func StartSlaveSyncAgent() {
 		token := getSetting("slave_sync_token")
 		interval := getInterval(getSetting("slave_interval"))
 
-		if masterURL != "" && token != "" {
+		if masterURL != "" && token != "" && getSetting("slave_enabled") == "1" {
 			if err := pullAndApply(masterURL, token); err != nil {
 				log.Printf("[slave-sync] 同步失败: %v", err)
 				setSyncStatus("slave", "error", err.Error())
