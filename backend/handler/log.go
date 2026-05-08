@@ -119,8 +119,8 @@ func StreamRuleLogs(c *gin.Context) {
 			if err != nil {
 				continue
 			}
-			fi, _ := f.Stat()
-			if fi.Size() <= offset {
+			fi, err := f.Stat()
+			if err != nil || fi.Size() <= offset {
 				f.Close()
 				continue
 			}

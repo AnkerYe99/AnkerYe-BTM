@@ -21,9 +21,10 @@ type Rule struct {
 	HCPath       string         `json:"hc_path"`
 	HCRise       int            `json:"hc_rise"`
 	HCFall       int            `json:"hc_fall"`
-	LogMaxSize   string         `json:"log_max_size"`
-	CustomConfig string         `json:"custom_config"`
-	CaptureBody  int            `json:"capture_body"`
+	LogMaxSize      string         `json:"log_max_size"`
+	CaptureMaxSize  string         `json:"capture_max_size"`
+	CustomConfig    string         `json:"custom_config"`
+	CaptureBody     int            `json:"capture_body"`
 	Status       int            `json:"status"`
 	CreatedAt    string         `json:"created_at"`
 	UpdatedAt    string         `json:"updated_at"`

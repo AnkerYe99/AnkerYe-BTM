@@ -92,6 +92,11 @@
             <template #append>超过此大小自动轮转压缩</template>
           </el-input>
         </el-form-item>
+        <el-form-item label="捕获日志上限">
+          <el-input v-model="form.capture_max_size" placeholder="5M / 10M / 100M">
+            <template #append>capture.log 超过此大小自动裁剪（保留最新）</template>
+          </el-input>
+        </el-form-item>
 
         <el-divider>后端节点 <el-tag type="info" size="small">至少 1 个</el-tag></el-divider>
         <el-table :data="form.servers" size="small" border>
@@ -173,7 +178,7 @@ const form = ref({
   server_name: '',
   lb_method: 'round_robin',
   hc_enabled: 1, hc_interval: 10, hc_timeout: 3, hc_path: '/',
-  hc_rise: 2, hc_fall: 3, log_max_size: '5M', custom_config: '',
+  hc_rise: 2, hc_fall: 3, log_max_size: '5M', capture_max_size: '5M', custom_config: '',
   capture_body: 0,
   servers: [{ address: '', port: null, weight: 1, state: 'up' }]
 })

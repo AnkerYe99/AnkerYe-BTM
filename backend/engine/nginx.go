@@ -58,12 +58,12 @@ func LoadRule(ruleID int64) (*model.Rule, error) {
 	row := db.DB.QueryRow(`SELECT id,name,protocol,listen_port,IFNULL(listen_stack,'both'),
 		https_enabled,https_port,server_name,lb_method,ssl_cert_id,ssl_redirect,
 		hc_enabled,hc_interval,hc_timeout,hc_path,hc_rise,hc_fall,
-		log_max_size,custom_config,IFNULL(capture_body,0),status,created_at,updated_at
+		log_max_size,IFNULL(capture_max_size,'5M'),custom_config,IFNULL(capture_body,0),status,created_at,updated_at
 		FROM rules WHERE id=?`, ruleID)
 	err := row.Scan(&r.ID, &r.Name, &r.Protocol, &r.ListenPort, &stack,
 		&r.HTTPSEnabled, &httpsPort, &r.ServerName, &r.LBMethod,
 		&certID, &r.SSLRedirect, &r.HCEnabled, &r.HCInterval, &r.HCTimeout, &r.HCPath,
-		&r.HCRise, &r.HCFall, &r.LogMaxSize, &r.CustomConfig, &r.CaptureBody, &r.Status, &r.CreatedAt, &r.UpdatedAt)
+		&r.HCRise, &r.HCFall, &r.LogMaxSize, &r.CaptureMaxSize, &r.CustomConfig, &r.CaptureBody, &r.Status, &r.CreatedAt, &r.UpdatedAt)
 	if stack.Valid {
 		r.ListenStack = stack.String
 	}

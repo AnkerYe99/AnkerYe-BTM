@@ -108,8 +108,12 @@ func DisableServer(c *gin.Context) {
 
 func ServerLogs(c *gin.Context) {
 	sid, _ := strconv.ParseInt(c.Param("sid"), 10, 64)
-	rows, _ := db.DB.Query(`SELECT id,state,latency_ms,IFNULL(message,''),created_at FROM health_check_logs
+	rows, err := db.DB.Query(`SELECT id,state,latency_ms,IFNULL(message,''),created_at FROM health_check_logs
 		WHERE server_id=? ORDER BY id DESC LIMIT 100`, sid)
+	if err != nil {
+		util.Fail(c, 500, err.Error())
+		return
+	}
 	defer rows.Close()
 	list := []gin.H{}
 	for rows.Next() {

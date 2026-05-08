@@ -153,6 +153,12 @@ func main() {
 		auth.POST("/sync/trigger_rules", handler.TriggerRulesSync)
 		auth.POST("/sync/trigger_certs", handler.TriggerCertsSync)
 		auth.POST("/sync/trigger_filter", handler.TriggerFilterSync)
+
+		// 日志管理
+		auth.GET("/logs", handler.ListLogs)
+		auth.GET("/logs/view", handler.ViewLog)
+		auth.GET("/logs/download", handler.DownloadLog)
+		auth.DELETE("/logs", handler.DeleteLog)
 	}
 
 	// 前端静态文件（SPA 模式，未匹配路由回退 index.html）

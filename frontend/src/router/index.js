@@ -21,7 +21,8 @@ const routes = [
       { path: 'filter', redirect: '/blacklist' },
       { path: 'blacklist', name: 'blacklist', component: () => import('../views/BlackList.vue') },
       { path: 'whitelist', name: 'whitelist', component: () => import('../views/WhiteList.vue') },
-      { path: 'settings', name: 'settings', component: () => import('../views/Settings.vue') }
+      { path: 'settings', name: 'settings', component: () => import('../views/Settings.vue') },
+      { path: 'logs', name: 'logs', component: () => import('../views/LogsView.vue') }
     ]
   }
 ]

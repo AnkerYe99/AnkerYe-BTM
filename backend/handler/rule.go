@@ -31,9 +31,10 @@ type ruleReq struct {
 	HCPath       string       `json:"hc_path"`
 	HCRise       int          `json:"hc_rise"`
 	HCFall       int          `json:"hc_fall"`
-	LogMaxSize   string       `json:"log_max_size"`
-	CustomConfig string       `json:"custom_config"`
-	CaptureBody  int          `json:"capture_body"`
+	LogMaxSize     string       `json:"log_max_size"`
+	CaptureMaxSize string       `json:"capture_max_size"`
+	CustomConfig   string       `json:"custom_config"`
+	CaptureBody    int          `json:"capture_body"`
 	Servers      []serverItem `json:"servers"`
 }
 
@@ -145,11 +146,11 @@ func CreateRule(c *gin.Context) {
 	res, err := tx.Exec(`INSERT INTO rules(name,protocol,listen_port,listen_stack,
 		https_enabled,https_port,server_name,lb_method,
 		ssl_cert_id,ssl_redirect,hc_enabled,hc_interval,hc_timeout,hc_path,hc_rise,hc_fall,
-		log_max_size,custom_config,capture_body) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		log_max_size,capture_max_size,custom_config,capture_body) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		req.Name, req.Protocol, req.ListenPort, req.ListenStack,
 		req.HTTPSEnabled, httpsPort, req.ServerName, req.LBMethod,
 		sslCertID, req.SSLRedirect, req.HCEnabled, req.HCInterval, req.HCTimeout,
-		req.HCPath, req.HCRise, req.HCFall, req.LogMaxSize, req.CustomConfig, req.CaptureBody)
+		req.HCPath, req.HCRise, req.HCFall, req.LogMaxSize, req.CaptureMaxSize, req.CustomConfig, req.CaptureBody)
 	if err != nil {
 		tx.Rollback()
 		util.Fail(c, 500, err.Error())
@@ -209,12 +210,12 @@ func UpdateRule(c *gin.Context) {
 	_, err := tx.Exec(`UPDATE rules SET name=?,protocol=?,listen_port=?,listen_stack=?,
 		https_enabled=?,https_port=?,server_name=?,lb_method=?,
 		ssl_cert_id=?,ssl_redirect=?,hc_enabled=?,hc_interval=?,hc_timeout=?,hc_path=?,
-		hc_rise=?,hc_fall=?,log_max_size=?,custom_config=?,capture_body=?,updated_at=datetime('now','localtime')
+		hc_rise=?,hc_fall=?,log_max_size=?,capture_max_size=?,custom_config=?,capture_body=?,updated_at=datetime('now','localtime')
 		WHERE id=?`,
 		req.Name, req.Protocol, req.ListenPort, req.ListenStack,
 		req.HTTPSEnabled, httpsPort, req.ServerName, req.LBMethod, sslCertID,
 		req.SSLRedirect, req.HCEnabled, req.HCInterval, req.HCTimeout, req.HCPath,
-		req.HCRise, req.HCFall, req.LogMaxSize, req.CustomConfig, req.CaptureBody, id)
+		req.HCRise, req.HCFall, req.LogMaxSize, req.CaptureMaxSize, req.CustomConfig, req.CaptureBody, id)
 	if err != nil {
 		tx.Rollback()
 		util.Fail(c, 500, err.Error())
@@ -453,6 +454,9 @@ func fillDefaults(r *ruleReq) {
 	}
 	if r.LogMaxSize == "" {
 		r.LogMaxSize = "5M"
+	}
+	if r.CaptureMaxSize == "" {
+		r.CaptureMaxSize = "5M"
 	}
 }
 

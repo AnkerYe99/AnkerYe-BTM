@@ -244,7 +244,11 @@ func ListErrorLogs(c *gin.Context) {
 
 // ListRulesSimple 返回规则 id+name 列表，供出错日志筛选用
 func ListRulesSimple(c *gin.Context) {
-	rows, _ := db.DB.Query(`SELECT id, name FROM rules ORDER BY id`)
+	rows, err := db.DB.Query(`SELECT id, name FROM rules ORDER BY id`)
+	if err != nil {
+		util.OK(c, []gin.H{})
+		return
+	}
 	defer rows.Close()
 	list := []gin.H{}
 	for rows.Next() {

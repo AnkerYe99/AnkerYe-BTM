@@ -67,27 +67,29 @@ func upsertSyncNode(addr, version, syncType string) {
 //     S:{address}|{port}|{weight}|{state}
 
 type ruleForExport struct {
-	ID           int64
-	Name         string
-	Protocol     string
-	ListenPort   int64
-	ListenStack  string
-	HttpsEnabled int64
-	HttpsPort    int64
-	ServerName   string
-	LbMethod     string
-	SslCertID    int64
-	SslRedirect  int64
-	HcEnabled    int64
-	HcInterval   int64
-	HcTimeout    int64
-	HcPath       string
-	HcFall       int64
-	HcRise       int64
-	LogMaxSize   string
-	CustomConfig string
-	Status       int64
-	Servers      []serverForExport
+	ID             int64
+	Name           string
+	Protocol       string
+	ListenPort     int64
+	ListenStack    string
+	HttpsEnabled   int64
+	HttpsPort      int64
+	ServerName     string
+	LbMethod       string
+	SslCertID      int64
+	SslRedirect    int64
+	HcEnabled      int64
+	HcInterval     int64
+	HcTimeout      int64
+	HcPath         string
+	HcFall         int64
+	HcRise         int64
+	LogMaxSize     string
+	CaptureMaxSize string
+	CustomConfig   string
+	CaptureBody    int64
+	Status         int64
+	Servers        []serverForExport
 }
 
 type serverForExport struct {
@@ -103,7 +105,8 @@ func queryRulesForExport() []ruleForExport {
 		https_enabled,IFNULL(https_port,0),IFNULL(server_name,''),lb_method,
 		IFNULL(ssl_cert_id,0),ssl_redirect,hc_enabled,hc_interval,hc_timeout,
 		IFNULL(hc_path,'/'),hc_fall,hc_rise,IFNULL(log_max_size,'5M'),
-		IFNULL(custom_config,''),status FROM rules ORDER BY id ASC`)
+		IFNULL(capture_max_size,'5M'),IFNULL(custom_config,''),IFNULL(capture_body,0),status
+		FROM rules ORDER BY id ASC`)
 	if rrows == nil {
 		return rules
 	}
@@ -113,7 +116,8 @@ func queryRulesForExport() []ruleForExport {
 		rrows.Scan(&r.ID, &r.Name, &r.Protocol, &r.ListenPort, &r.ListenStack,
 			&r.HttpsEnabled, &r.HttpsPort, &r.ServerName, &r.LbMethod,
 			&r.SslCertID, &r.SslRedirect, &r.HcEnabled, &r.HcInterval, &r.HcTimeout,
-			&r.HcPath, &r.HcFall, &r.HcRise, &r.LogMaxSize, &r.CustomConfig, &r.Status)
+			&r.HcPath, &r.HcFall, &r.HcRise, &r.LogMaxSize, &r.CaptureMaxSize,
+			&r.CustomConfig, &r.CaptureBody, &r.Status)
 		rules = append(rules, r)
 	}
 	for i := range rules {
@@ -269,7 +273,8 @@ func SyncExport(c *gin.Context) {
 			"ssl_cert_id": r.SslCertID, "ssl_redirect": r.SslRedirect,
 			"hc_enabled": r.HcEnabled, "hc_interval": r.HcInterval, "hc_timeout": r.HcTimeout,
 			"hc_path": r.HcPath, "hc_fall": r.HcFall, "hc_rise": r.HcRise,
-			"log_max_size": r.LogMaxSize, "custom_config": r.CustomConfig, "status": r.Status,
+			"log_max_size": r.LogMaxSize, "capture_max_size": r.CaptureMaxSize,
+			"custom_config": r.CustomConfig, "capture_body": r.CaptureBody, "status": r.Status,
 			"servers": servers,
 		})
 	}
@@ -338,7 +343,8 @@ func SyncRulesExport(c *gin.Context) {
 			"ssl_cert_id": r.SslCertID, "ssl_redirect": r.SslRedirect,
 			"hc_enabled": r.HcEnabled, "hc_interval": r.HcInterval, "hc_timeout": r.HcTimeout,
 			"hc_path": r.HcPath, "hc_fall": r.HcFall, "hc_rise": r.HcRise,
-			"log_max_size": r.LogMaxSize, "custom_config": r.CustomConfig, "status": r.Status,
+			"log_max_size": r.LogMaxSize, "capture_max_size": r.CaptureMaxSize,
+			"custom_config": r.CustomConfig, "capture_body": r.CaptureBody, "status": r.Status,
 			"servers": servers,
 		})
 	}

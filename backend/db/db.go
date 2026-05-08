@@ -302,6 +302,9 @@ var versionedMigrations = []struct {
 		// 规则级开关：是否记录请求体（POST body）到独立 capture log，用于回放/测试数据
 		`ALTER TABLE rules ADD COLUMN capture_body INTEGER DEFAULT 0`,
 	}},
+	{6, "add_capture_max_size", []string{
+		`ALTER TABLE rules ADD COLUMN capture_max_size TEXT DEFAULT '5M'`,
+	}},
 }
 
 func migrate() error {

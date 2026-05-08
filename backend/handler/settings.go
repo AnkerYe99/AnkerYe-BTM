@@ -145,21 +145,24 @@ func Backup(c *gin.Context) {
 		IFNULL(listen_stack,'both'),IFNULL(https_enabled,0),IFNULL(https_port,0),
 		IFNULL(server_name,''),lb_method,ssl_cert_id,ssl_redirect,hc_enabled,hc_interval,hc_timeout,
 		IFNULL(hc_path,''),IFNULL(hc_rise,0),IFNULL(hc_fall,0),
-		IFNULL(log_max_size,''),IFNULL(custom_config,''),status FROM rules ORDER BY id`)
+		IFNULL(log_max_size,''),IFNULL(capture_max_size,'5M'),IFNULL(custom_config,''),
+		IFNULL(capture_body,0),status FROM rules ORDER BY id`)
 	for rows.Next() {
 		var id int64
-		var name, proto, stack, srvName, lbm, hcPath, logSize, custom string
-		var port, httpsEn, httpsPort, sslRed, hcEn, hcInt, hcTo, hcRise, hcFall, status int
+		var name, proto, stack, srvName, lbm, hcPath, logSize, captureMaxSize, custom string
+		var port, httpsEn, httpsPort, sslRed, hcEn, hcInt, hcTo, hcRise, hcFall, captureBody, status int
 		var sslCert interface{}
 		rows.Scan(&id, &name, &proto, &port, &stack, &httpsEn, &httpsPort, &srvName, &lbm, &sslCert,
-			&sslRed, &hcEn, &hcInt, &hcTo, &hcPath, &hcRise, &hcFall, &logSize, &custom, &status)
+			&sslRed, &hcEn, &hcInt, &hcTo, &hcPath, &hcRise, &hcFall, &logSize, &captureMaxSize,
+			&custom, &captureBody, &status)
 		data.Rules = append(data.Rules, map[string]interface{}{
 			"id": id, "name": name, "protocol": proto, "listen_port": port,
 			"listen_stack": stack, "https_enabled": httpsEn, "https_port": httpsPort,
 			"server_name": srvName, "lb_method": lbm, "ssl_cert_id": sslCert,
 			"ssl_redirect": sslRed, "hc_enabled": hcEn, "hc_interval": hcInt, "hc_timeout": hcTo,
 			"hc_path": hcPath, "hc_rise": hcRise, "hc_fall": hcFall,
-			"log_max_size": logSize, "custom_config": custom, "status": status,
+			"log_max_size": logSize, "capture_max_size": captureMaxSize,
+			"custom_config": custom, "capture_body": captureBody, "status": status,
 		})
 	}
 	rows.Close()
@@ -280,15 +283,21 @@ func Restore(c *gin.Context) {
 
 	// 恢复规则
 	for _, m := range data.Rules {
+		captureMaxSize, _ := m["capture_max_size"].(string)
+		if captureMaxSize == "" {
+			captureMaxSize = "5M"
+		}
 		tx.Exec(`INSERT OR IGNORE INTO rules(id,name,protocol,listen_port,listen_stack,https_enabled,https_port,
 			server_name,lb_method,ssl_cert_id,ssl_redirect,hc_enabled,hc_interval,hc_timeout,hc_path,
-			hc_rise,hc_fall,log_max_size,custom_config,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			hc_rise,hc_fall,log_max_size,capture_max_size,custom_config,capture_body,status)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			int64v(m["id"]), m["name"], m["protocol"], int64v(m["listen_port"]),
 			m["listen_stack"], int64v(m["https_enabled"]), int64v(m["https_port"]),
 			m["server_name"], m["lb_method"], m["ssl_cert_id"], int64v(m["ssl_redirect"]),
 			int64v(m["hc_enabled"]), int64v(m["hc_interval"]), int64v(m["hc_timeout"]),
 			m["hc_path"], int64v(m["hc_rise"]), int64v(m["hc_fall"]),
-			m["log_max_size"], m["custom_config"], int64v(m["status"]))
+			m["log_max_size"], captureMaxSize, m["custom_config"], int64v(m["capture_body"]),
+			int64v(m["status"]))
 	}
 	// 恢复节点
 	for _, m := range data.Servers {

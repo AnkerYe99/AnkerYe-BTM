@@ -56,27 +56,29 @@ type syncServer struct {
 }
 
 type syncRule struct {
-	ID           int64        `json:"id"`
-	Name         string       `json:"name"`
-	Protocol     string       `json:"protocol"`
-	ListenPort   int64        `json:"listen_port"`
-	ListenStack  string       `json:"listen_stack"`
-	HttpsEnabled int64        `json:"https_enabled"`
-	HttpsPort    int64        `json:"https_port"`
-	ServerName   string       `json:"server_name"`
-	LbMethod     string       `json:"lb_method"`
-	SslCertID    int64        `json:"ssl_cert_id"`
-	SslRedirect  int64        `json:"ssl_redirect"`
-	HcEnabled    int64        `json:"hc_enabled"`
-	HcInterval   int64        `json:"hc_interval"`
-	HcTimeout    int64        `json:"hc_timeout"`
-	HcPath       string       `json:"hc_path"`
-	HcFall       int64        `json:"hc_fall"`
-	HcRise       int64        `json:"hc_rise"`
-	LogMaxSize   string       `json:"log_max_size"`
-	CustomConfig string       `json:"custom_config"`
-	Status       int64        `json:"status"`
-	Servers      []syncServer `json:"servers"`
+	ID             int64        `json:"id"`
+	Name           string       `json:"name"`
+	Protocol       string       `json:"protocol"`
+	ListenPort     int64        `json:"listen_port"`
+	ListenStack    string       `json:"listen_stack"`
+	HttpsEnabled   int64        `json:"https_enabled"`
+	HttpsPort      int64        `json:"https_port"`
+	ServerName     string       `json:"server_name"`
+	LbMethod       string       `json:"lb_method"`
+	SslCertID      int64        `json:"ssl_cert_id"`
+	SslRedirect    int64        `json:"ssl_redirect"`
+	HcEnabled      int64        `json:"hc_enabled"`
+	HcInterval     int64        `json:"hc_interval"`
+	HcTimeout      int64        `json:"hc_timeout"`
+	HcPath         string       `json:"hc_path"`
+	HcFall         int64        `json:"hc_fall"`
+	HcRise         int64        `json:"hc_rise"`
+	LogMaxSize     string       `json:"log_max_size"`
+	CaptureMaxSize string       `json:"capture_max_size"`
+	CustomConfig   string       `json:"custom_config"`
+	CaptureBody    int64        `json:"capture_body"`
+	Status         int64        `json:"status"`
+	Servers        []syncServer `json:"servers"`
 }
 
 type syncCert struct {
@@ -383,11 +385,15 @@ func upsertRules(rules []syncRule) {
 		if r.SslCertID > 0 {
 			sslCertID = r.SslCertID
 		}
+		captureMaxSize := r.CaptureMaxSize
+		if captureMaxSize == "" {
+			captureMaxSize = "5M"
+		}
 		db.DB.Exec(`INSERT INTO rules(id,name,protocol,listen_port,listen_stack,
 			https_enabled,https_port,server_name,lb_method,ssl_cert_id,ssl_redirect,
 			hc_enabled,hc_interval,hc_timeout,hc_path,hc_fall,hc_rise,
-			log_max_size,custom_config,status)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			log_max_size,capture_max_size,custom_config,capture_body,status)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 			ON CONFLICT(id) DO UPDATE SET
 			name=excluded.name, protocol=excluded.protocol, listen_port=excluded.listen_port,
 			listen_stack=excluded.listen_stack, https_enabled=excluded.https_enabled,
@@ -396,12 +402,13 @@ func upsertRules(rules []syncRule) {
 			ssl_redirect=excluded.ssl_redirect, hc_enabled=excluded.hc_enabled,
 			hc_interval=excluded.hc_interval, hc_timeout=excluded.hc_timeout,
 			hc_path=excluded.hc_path, hc_fall=excluded.hc_fall, hc_rise=excluded.hc_rise,
-			log_max_size=excluded.log_max_size, custom_config=excluded.custom_config,
+			log_max_size=excluded.log_max_size, capture_max_size=excluded.capture_max_size,
+			custom_config=excluded.custom_config, capture_body=excluded.capture_body,
 			status=excluded.status`,
 			r.ID, r.Name, r.Protocol, r.ListenPort, r.ListenStack,
 			r.HttpsEnabled, r.HttpsPort, r.ServerName, r.LbMethod, sslCertID, r.SslRedirect,
 			r.HcEnabled, r.HcInterval, r.HcTimeout, r.HcPath, r.HcFall, r.HcRise,
-			r.LogMaxSize, r.CustomConfig, r.Status)
+			r.LogMaxSize, captureMaxSize, r.CustomConfig, r.CaptureBody, r.Status)
 
 		db.DB.Exec(`DELETE FROM upstream_servers WHERE rule_id=?`, r.ID)
 		for _, s := range r.Servers {
