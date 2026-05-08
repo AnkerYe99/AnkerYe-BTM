@@ -141,63 +141,67 @@ type backupData struct {
 func Backup(c *gin.Context) {
 	data := backupData{Settings: map[string]string{}}
 	// Rules
-	rows, _ := db.DB.Query(`SELECT id,name,protocol,listen_port,
+	if rows, err := db.DB.Query(`SELECT id,name,protocol,listen_port,
 		IFNULL(listen_stack,'both'),IFNULL(https_enabled,0),IFNULL(https_port,0),
 		IFNULL(server_name,''),lb_method,ssl_cert_id,ssl_redirect,hc_enabled,hc_interval,hc_timeout,
 		IFNULL(hc_path,''),IFNULL(hc_rise,0),IFNULL(hc_fall,0),
 		IFNULL(log_max_size,''),IFNULL(capture_max_size,'5M'),IFNULL(custom_config,''),
-		IFNULL(capture_body,0),status FROM rules ORDER BY id`)
-	for rows.Next() {
-		var id int64
-		var name, proto, stack, srvName, lbm, hcPath, logSize, captureMaxSize, custom string
-		var port, httpsEn, httpsPort, sslRed, hcEn, hcInt, hcTo, hcRise, hcFall, captureBody, status int
-		var sslCert interface{}
-		rows.Scan(&id, &name, &proto, &port, &stack, &httpsEn, &httpsPort, &srvName, &lbm, &sslCert,
-			&sslRed, &hcEn, &hcInt, &hcTo, &hcPath, &hcRise, &hcFall, &logSize, &captureMaxSize,
-			&custom, &captureBody, &status)
-		data.Rules = append(data.Rules, map[string]interface{}{
-			"id": id, "name": name, "protocol": proto, "listen_port": port,
-			"listen_stack": stack, "https_enabled": httpsEn, "https_port": httpsPort,
-			"server_name": srvName, "lb_method": lbm, "ssl_cert_id": sslCert,
-			"ssl_redirect": sslRed, "hc_enabled": hcEn, "hc_interval": hcInt, "hc_timeout": hcTo,
-			"hc_path": hcPath, "hc_rise": hcRise, "hc_fall": hcFall,
-			"log_max_size": logSize, "capture_max_size": captureMaxSize,
-			"custom_config": custom, "capture_body": captureBody, "status": status,
-		})
+		IFNULL(capture_body,0),status FROM rules ORDER BY id`); err == nil {
+		for rows.Next() {
+			var id int64
+			var name, proto, stack, srvName, lbm, hcPath, logSize, captureMaxSize, custom string
+			var port, httpsEn, httpsPort, sslRed, hcEn, hcInt, hcTo, hcRise, hcFall, captureBody, status int
+			var sslCert interface{}
+			rows.Scan(&id, &name, &proto, &port, &stack, &httpsEn, &httpsPort, &srvName, &lbm, &sslCert,
+				&sslRed, &hcEn, &hcInt, &hcTo, &hcPath, &hcRise, &hcFall, &logSize, &captureMaxSize,
+				&custom, &captureBody, &status)
+			data.Rules = append(data.Rules, map[string]interface{}{
+				"id": id, "name": name, "protocol": proto, "listen_port": port,
+				"listen_stack": stack, "https_enabled": httpsEn, "https_port": httpsPort,
+				"server_name": srvName, "lb_method": lbm, "ssl_cert_id": sslCert,
+				"ssl_redirect": sslRed, "hc_enabled": hcEn, "hc_interval": hcInt, "hc_timeout": hcTo,
+				"hc_path": hcPath, "hc_rise": hcRise, "hc_fall": hcFall,
+				"log_max_size": logSize, "capture_max_size": captureMaxSize,
+				"custom_config": custom, "capture_body": captureBody, "status": status,
+			})
+		}
+		rows.Close()
 	}
-	rows.Close()
 	// Servers
-	rows2, _ := db.DB.Query(`SELECT id,rule_id,address,port,weight,state FROM upstream_servers ORDER BY id`)
-	for rows2.Next() {
-		var id, rid int64
-		var addr, state string
-		var port, weight int
-		rows2.Scan(&id, &rid, &addr, &port, &weight, &state)
-		data.Servers = append(data.Servers, map[string]interface{}{
-			"id": id, "rule_id": rid, "address": addr, "port": port, "weight": weight, "state": state,
-		})
+	if rows2, err := db.DB.Query(`SELECT id,rule_id,address,port,weight,state FROM upstream_servers ORDER BY id`); err == nil {
+		for rows2.Next() {
+			var id, rid int64
+			var addr, state string
+			var port, weight int
+			rows2.Scan(&id, &rid, &addr, &port, &weight, &state)
+			data.Servers = append(data.Servers, map[string]interface{}{
+				"id": id, "rule_id": rid, "address": addr, "port": port, "weight": weight, "state": state,
+			})
+		}
+		rows2.Close()
 	}
-	rows2.Close()
 	// Certs
-	rows3, _ := db.DB.Query(`SELECT id,domain,cert_pem,key_pem,expire_at,auto_renew FROM ssl_certs ORDER BY id`)
-	for rows3.Next() {
-		var id int64
-		var domain, cert, key, expire string
-		var ar int
-		rows3.Scan(&id, &domain, &cert, &key, &expire, &ar)
-		data.Certs = append(data.Certs, map[string]interface{}{
-			"id": id, "domain": domain, "cert_pem": cert, "key_pem": key, "expire_at": expire, "auto_renew": ar,
-		})
+	if rows3, err := db.DB.Query(`SELECT id,domain,cert_pem,key_pem,expire_at,auto_renew FROM ssl_certs ORDER BY id`); err == nil {
+		for rows3.Next() {
+			var id int64
+			var domain, cert, key, expire string
+			var ar int
+			rows3.Scan(&id, &domain, &cert, &key, &expire, &ar)
+			data.Certs = append(data.Certs, map[string]interface{}{
+				"id": id, "domain": domain, "cert_pem": cert, "key_pem": key, "expire_at": expire, "auto_renew": ar,
+			})
+		}
+		rows3.Close()
 	}
-	rows3.Close()
 	// Settings
-	rows4, _ := db.DB.Query(`SELECT k,v FROM system_settings`)
-	for rows4.Next() {
-		var k, v string
-		rows4.Scan(&k, &v)
-		data.Settings[k] = v
+	if rows4, err := db.DB.Query(`SELECT k,v FROM system_settings`); err == nil {
+		for rows4.Next() {
+			var k, v string
+			rows4.Scan(&k, &v)
+			data.Settings[k] = v
+		}
+		rows4.Close()
 	}
-	rows4.Close()
 	// 黑名单
 	rows5, _ := db.DB.Query(`SELECT id,type,value,note,hits,auto_added,enabled FROM filter_blacklist ORDER BY id`)
 	if rows5 != nil {

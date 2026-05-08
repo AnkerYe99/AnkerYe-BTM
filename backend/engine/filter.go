@@ -182,7 +182,12 @@ func tailLog(logFile string) {
 			time.Sleep(5 * time.Second)
 			continue
 		}
-		info, _ := f.Stat()
+		info, statErr := f.Stat()
+		if statErr != nil {
+			f.Close()
+			time.Sleep(5 * time.Second)
+			continue
+		}
 		if info.Size() < offset {
 			offset = 0 // 日志轮转，从头读
 		}

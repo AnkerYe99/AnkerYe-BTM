@@ -249,7 +249,11 @@ func AutoRenewCheck() {
 		log.Println("[auto-renew] 已禁用本机自动续签（从节点模式）")
 		return
 	}
-	rows, _ := db.DB.Query(`SELECT id, domain, expire_at, renew_status FROM ssl_certs WHERE auto_renew=1`)
+	rows, err := db.DB.Query(`SELECT id, domain, expire_at, renew_status FROM ssl_certs WHERE auto_renew=1`)
+	if err != nil {
+		log.Printf("[auto-renew] query failed: %v", err)
+		return
+	}
 	defer rows.Close()
 	for rows.Next() {
 		var id int64

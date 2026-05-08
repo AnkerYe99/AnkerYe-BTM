@@ -3,6 +3,7 @@ package handler
 import (
 	"net"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -71,7 +72,12 @@ func AddBlacklist(c *gin.Context) {
 		body.Type, body.Value, body.Note,
 	)
 	if err != nil {
-		util.Fail(c, 409, "已存在相同条目"); return
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			util.Fail(c, 409, "已存在相同条目")
+		} else {
+			util.Fail(c, 500, "数据库错误: "+err.Error())
+		}
+		return
 	}
 	id, _ := res.LastInsertId()
 	engine.ApplyFilter()
@@ -160,7 +166,12 @@ func AddWhitelist(c *gin.Context) {
 		body.Type, body.Value, body.Note,
 	)
 	if err != nil {
-		util.Fail(c, 409, "已存在相同条目"); return
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			util.Fail(c, 409, "已存在相同条目")
+		} else {
+			util.Fail(c, 500, "数据库错误: "+err.Error())
+		}
+		return
 	}
 	id, _ := res.LastInsertId()
 	engine.ApplyFilter()

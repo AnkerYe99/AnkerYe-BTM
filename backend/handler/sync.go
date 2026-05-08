@@ -138,11 +138,11 @@ func queryRulesForExport() []ruleForExport {
 func hashRules(rules []ruleForExport) string {
 	h := md5.New()
 	for _, r := range rules {
-		fmt.Fprintf(h, "R:%d|%q|%q|%d|%q|%d|%d|%q|%q|%d|%d|%d|%d|%d|%q|%d|%d|%q|%q|%d\n",
+		fmt.Fprintf(h, "R:%d|%q|%q|%d|%q|%d|%d|%q|%q|%d|%d|%d|%d|%d|%q|%d|%d|%q|%q|%q|%d|%d\n",
 			r.ID, r.Name, r.Protocol, r.ListenPort, r.ListenStack,
 			r.HttpsEnabled, r.HttpsPort, r.ServerName, r.LbMethod,
 			r.SslCertID, r.SslRedirect, r.HcEnabled, r.HcInterval, r.HcTimeout,
-			r.HcPath, r.HcFall, r.HcRise, r.LogMaxSize, r.CustomConfig, r.Status)
+			r.HcPath, r.HcFall, r.HcRise, r.LogMaxSize, r.CaptureMaxSize, r.CustomConfig, r.CaptureBody, r.Status)
 		for _, s := range r.Servers {
 			fmt.Fprintf(h, "S:%q|%d|%d|%q\n", s.Address, s.Port, s.Weight, s.State)
 		}

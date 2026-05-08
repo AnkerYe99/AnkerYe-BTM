@@ -246,6 +246,10 @@ func UpdateRule(c *gin.Context) {
 
 func DeleteRule(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	if id <= 0 {
+		util.Fail(c, 400, "无效的规则 ID")
+		return
+	}
 	health.StopRule(id)
 	engine.DeleteRule(id)
 	db.DB.Exec(`DELETE FROM rules WHERE id=?`, id)
@@ -256,6 +260,10 @@ func DeleteRule(c *gin.Context) {
 
 func EnableRule(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	if id <= 0 {
+		util.Fail(c, 400, "无效的规则 ID")
+		return
+	}
 	db.DB.Exec(`UPDATE rules SET status=1 WHERE id=?`, id)
 	if err := engine.ApplyRule(id); err != nil {
 		util.Fail(c, 500, err.Error())
@@ -267,6 +275,10 @@ func EnableRule(c *gin.Context) {
 
 func DisableRule(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	if id <= 0 {
+		util.Fail(c, 400, "无效的规则 ID")
+		return
+	}
 	db.DB.Exec(`UPDATE rules SET status=0 WHERE id=?`, id)
 	health.StopRule(id)
 	// DeleteRule 内部已含 smartReload，无需再调 Reload

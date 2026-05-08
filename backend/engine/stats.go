@@ -3,6 +3,7 @@ package engine
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"regexp"
@@ -186,7 +187,7 @@ func parseLogFile(ruleID int64, logFile string, isStream bool, serverMap map[str
 	days := map[string]*dayStat{}
 	serverDays := map[int64]map[string]*dayStat{}
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 64*1024), 64*1024)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -224,6 +225,10 @@ func parseLogFile(ruleID int64, logFile string, isStream bool, serverMap map[str
 				updateDayStat(serverDays[sid], date, status, bytesOut)
 			}
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("[stats] scanner error %s: %v", logFile, err)
 	}
 
 	newOffset, _ := f.Seek(0, 1)

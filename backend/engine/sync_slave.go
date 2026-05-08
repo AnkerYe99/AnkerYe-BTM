@@ -203,8 +203,9 @@ func localRulesMD5() string {
 	type row struct {
 		id, listenPort, httpsEnabled, httpsPort, sslCertID, sslRedirect int64
 		hcEnabled, hcInterval, hcTimeout, hcFall, hcRise, status        int64
+		captureBody                                                       int64
 		name, protocol, listenStack, serverName, lbMethod                string
-		hcPath, logMaxSize, customConfig                                  string
+		hcPath, logMaxSize, captureMaxSize, customConfig                  string
 	}
 
 	var rules []row
@@ -212,14 +213,15 @@ func localRulesMD5() string {
 		https_enabled,IFNULL(https_port,0),IFNULL(server_name,''),lb_method,
 		IFNULL(ssl_cert_id,0),ssl_redirect,hc_enabled,hc_interval,hc_timeout,
 		IFNULL(hc_path,'/'),hc_fall,hc_rise,IFNULL(log_max_size,'5M'),
-		IFNULL(custom_config,''),status FROM rules ORDER BY id ASC`)
+		IFNULL(capture_max_size,'5M'),IFNULL(custom_config,''),IFNULL(capture_body,0),status FROM rules ORDER BY id ASC`)
 	if rrows != nil {
 		for rrows.Next() {
 			var r row
 			rrows.Scan(&r.id, &r.name, &r.protocol, &r.listenPort, &r.listenStack,
 				&r.httpsEnabled, &r.httpsPort, &r.serverName, &r.lbMethod,
 				&r.sslCertID, &r.sslRedirect, &r.hcEnabled, &r.hcInterval, &r.hcTimeout,
-				&r.hcPath, &r.hcFall, &r.hcRise, &r.logMaxSize, &r.customConfig, &r.status)
+				&r.hcPath, &r.hcFall, &r.hcRise, &r.logMaxSize,
+				&r.captureMaxSize, &r.customConfig, &r.captureBody, &r.status)
 			rules = append(rules, r)
 		}
 		rrows.Close()
@@ -227,11 +229,11 @@ func localRulesMD5() string {
 
 	type srow struct{ address, state string; port, weight int64 }
 	for _, r := range rules {
-		fmt.Fprintf(h, "R:%d|%q|%q|%d|%q|%d|%d|%q|%q|%d|%d|%d|%d|%d|%q|%d|%d|%q|%q|%d\n",
+		fmt.Fprintf(h, "R:%d|%q|%q|%d|%q|%d|%d|%q|%q|%d|%d|%d|%d|%d|%q|%d|%d|%q|%q|%q|%d|%d\n",
 			r.id, r.name, r.protocol, r.listenPort, r.listenStack,
 			r.httpsEnabled, r.httpsPort, r.serverName, r.lbMethod,
 			r.sslCertID, r.sslRedirect, r.hcEnabled, r.hcInterval, r.hcTimeout,
-			r.hcPath, r.hcFall, r.hcRise, r.logMaxSize, r.customConfig, r.status)
+			r.hcPath, r.hcFall, r.hcRise, r.logMaxSize, r.captureMaxSize, r.customConfig, r.captureBody, r.status)
 
 		srows, _ := db.DB.Query(`SELECT address,port,weight,state FROM upstream_servers
 			WHERE rule_id=? ORDER BY address ASC, port ASC`, r.id)
