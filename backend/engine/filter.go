@@ -58,6 +58,27 @@ func buildFilterConf() (string, error) {
 	var sb strings.Builder
 	sb.WriteString("# AnkerYe - Flow 过滤配置（自动生成，勿手动修改）\n")
 
+	// Real IP 穿透：信任所有 BTM 节点，让 $remote_addr 还原为真实客户端 IP
+	sb.WriteString("# --- Real IP 穿透 ---\n")
+	for _, cidr := range []string{
+		"10.0.0.0/8",        // 内网
+		"172.16.0.0/12",     // Docker/内网
+		"42.2.33.138",       // 1107
+		"47.239.137.202",    // ALHK
+		"8.159.153.184",     // ALSH
+		"81.69.185.252",     // TXSH
+		"161.153.89.153",    // 甲骨文1
+		"141.147.179.9",     // 甲骨文2
+		"158.101.89.59",     // 甲骨文3
+		"129.146.250.212",   // 甲骨文4
+		"161.118.230.77",    // 甲骨文5/SG1
+		"168.138.161.90",    // 甲骨文6/SG2
+	} {
+		sb.WriteString(fmt.Sprintf("set_real_ip_from %s;\n", cidr))
+	}
+	sb.WriteString("real_ip_header    X-Real-IP;\n")
+	sb.WriteString("real_ip_recursive on;\n\n")
+
 	// 白名单 geo
 	sb.WriteString("geo $__nf_wl {\n    default 0;\n")
 	rows, _ := db.DB.Query(`SELECT value FROM filter_whitelist WHERE type IN ('ip','cidr') AND enabled=1`)

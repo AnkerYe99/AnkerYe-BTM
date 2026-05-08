@@ -25,7 +25,7 @@ func GetRenewLog(c *gin.Context) {
 func ListCerts(c *gin.Context) {
 	rows, err := db.DB.Query(`SELECT id,domain,expire_at,auto_renew,IFNULL(tencent_cert_id,''),
 		renew_status,IFNULL(renew_log,''),IFNULL(last_renew_at,''),created_at,updated_at
-		FROM ssl_certs ORDER BY id DESC`)
+		FROM ssl_certs ORDER BY CASE WHEN expire_at='' OR expire_at IS NULL THEN 1 ELSE 0 END, expire_at ASC`)
 	if err != nil {
 		util.Fail(c, 500, err.Error())
 		return

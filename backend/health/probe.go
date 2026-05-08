@@ -33,6 +33,12 @@ func Probe(s *model.Server, r *model.Rule) ProbeResult {
 		return probeTCP(addr, timeout, start)
 	case "udp":
 		return probeUDP(addr, timeout, start)
+	case "tcpudp":
+		// TCP+UDP 规则优先用 TCP 探测，失败则降级 UDP
+		if res := probeTCP(addr, timeout, start); res.OK {
+			return res
+		}
+		return probeUDP(addr, timeout, start)
 	}
 	return ProbeResult{OK: false, Err: "unknown protocol"}
 }
@@ -60,7 +66,8 @@ func probeHTTP(addr, proto, path string, timeout time.Duration, start time.Time)
 		return ProbeResult{OK: false, Latency: latency, Err: err.Error()}
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+	// 4xx 说明服务器在线只是拒绝该路径，5xx 才是真正故障
+	if resp.StatusCode < 500 {
 		return ProbeResult{OK: true, Latency: latency}
 	}
 	return ProbeResult{OK: false, Latency: latency, Err: fmt.Sprintf("status=%d", resp.StatusCode)}
