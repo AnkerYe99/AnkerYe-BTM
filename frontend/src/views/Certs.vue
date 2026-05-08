@@ -11,7 +11,9 @@
       <div style="overflow-x:auto">
         <el-table :data="pagedList" size="small" table-layout="auto">
           <el-table-column prop="domain" label="域名" min-width="160" show-overflow-tooltip />
-          <el-table-column v-if="!isMobile" prop="expire_at" label="到期时间" min-width="156" />
+          <el-table-column v-if="!isMobile" label="到期时间" min-width="112">
+            <template #default="{row}">{{ fmtDate(row.expire_at) }}</template>
+          </el-table-column>
           <el-table-column label="剩余天数" min-width="92" align="center">
             <template #default="{row}">
               <el-tag :type="daysLeft(row.expire_at) < 10 ? 'danger' : 'success'" size="small">
@@ -31,7 +33,9 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column v-if="!isMobile" prop="last_renew_at" label="最后续签" min-width="156" />
+          <el-table-column v-if="!isMobile" label="最后续签" min-width="112">
+            <template #default="{row}">{{ fmtDate(row.last_renew_at) }}</template>
+          </el-table-column>
           <el-table-column label="操作" :min-width="isMobile ? 100 : 240" fixed="right">
             <template #default="{row}">
               <template v-if="isMobile">
@@ -51,10 +55,12 @@
                 </el-dropdown>
               </template>
               <template v-else>
-                <el-button size="small" @click="openEdit(row)">编辑</el-button>
-                <el-button size="small" type="primary" @click="renew(row)">续签</el-button>
-                <el-button size="small" type="info" @click="openLog(row)">日志</el-button>
-                <el-button size="small" type="danger" @click="del(row)">删除</el-button>
+                <div style="display:flex;gap:4px;align-items:center;flex-wrap:nowrap">
+                  <el-button size="small" @click="openEdit(row)">编辑</el-button>
+                  <el-button size="small" type="primary" @click="renew(row)">续签</el-button>
+                  <el-button size="small" type="info" @click="openLog(row)">日志</el-button>
+                  <el-button size="small" type="danger" @click="del(row)">删除</el-button>
+                </div>
               </template>
             </template>
           </el-table-column>
@@ -291,6 +297,10 @@ async function saveEdit() {
   editSaving.value = false
 }
 
+function fmtDate(s) {
+  if (!s) return '—'
+  return s.slice(0, 10)
+}
 function daysLeft(expire) {
   return Math.ceil((new Date(expire) - new Date()) / 86400000)
 }

@@ -75,19 +75,21 @@
                 </el-dropdown>
               </template>
               <template v-else>
-                <el-button size="small" @click="$router.push(`/rules/${row.id}/edit`)">编辑</el-button>
-                <el-button v-if="row.status===1" size="small" @click="toggle(row,0)">禁用</el-button>
-                <el-button v-else size="small" type="success" @click="toggle(row,1)">启用</el-button>
-                <el-dropdown size="small" @command="handleCmd($event, row)" style="margin-left:6px">
-                  <el-button size="small">更多<el-icon class="el-icon--right"><ArrowDown/></el-icon></el-button>
-                  <template #dropdown>
-                    <el-dropdown-menu>
-                      <el-dropdown-item command="preview">预览配置</el-dropdown-item>
-                      <el-dropdown-item command="log">实时日志</el-dropdown-item>
-                      <el-dropdown-item command="del" divided style="color:#f56c6c">删除</el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
+                <div style="display:flex;gap:4px;align-items:center;flex-wrap:nowrap">
+                  <el-button size="small" @click="router.push(`/rules/${row.id}/edit`)">编辑</el-button>
+                  <el-button v-if="row.status===1" size="small" @click="toggle(row,0)">禁用</el-button>
+                  <el-button v-else size="small" type="success" @click="toggle(row,1)">启用</el-button>
+                  <el-dropdown size="small" @command="handleCmd($event, row)">
+                    <el-button size="small">更多<el-icon class="el-icon--right"><ArrowDown/></el-icon></el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item command="preview">预览配置</el-dropdown-item>
+                        <el-dropdown-item command="log">实时日志</el-dropdown-item>
+                        <el-dropdown-item command="del" divided style="color:#f56c6c">删除</el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                </div>
               </template>
             </template>
           </el-table-column>
