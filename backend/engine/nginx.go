@@ -255,8 +255,8 @@ func renderStream(r *model.Rule, servers []model.Server) string {
 		// UDP server block
 		sb.WriteString("server {\n")
 		sb.WriteString(renderListen(r.ListenStack, r.ListenPort, "udp"))
-		sb.WriteString("    proxy_timeout 3s;\n")
-		sb.WriteString("    proxy_responses 1;\n")
+		sb.WriteString("    proxy_timeout 30s;\n")
+		sb.WriteString("    proxy_responses 0;\n")
 		sb.WriteString(fmt.Sprintf("    proxy_pass nf_stream_%d;\n", r.ID))
 		sb.WriteString(fmt.Sprintf("    access_log %s/rule_%d_stream.log basic;\n", config.Global.Nginx.LogDir, r.ID))
 		sb.WriteString("}\n")
@@ -266,8 +266,8 @@ func renderStream(r *model.Rule, servers []model.Server) string {
 	sb.WriteString("server {\n")
 	if r.Protocol == "udp" {
 		sb.WriteString(renderListen(r.ListenStack, r.ListenPort, "udp"))
-		sb.WriteString("    proxy_timeout 3s;\n")
-		sb.WriteString("    proxy_responses 1;\n")
+		sb.WriteString("    proxy_timeout 30s;\n")
+		sb.WriteString("    proxy_responses 0;\n")
 	} else {
 		sb.WriteString(renderListen(r.ListenStack, r.ListenPort, ""))
 		sb.WriteString("    proxy_timeout 600s;\n")
