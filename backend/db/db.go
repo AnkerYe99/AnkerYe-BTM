@@ -305,6 +305,9 @@ var versionedMigrations = []struct {
 	{6, "add_capture_max_size", []string{
 		`ALTER TABLE rules ADD COLUMN capture_max_size TEXT DEFAULT '5M'`,
 	}},
+	{7, "add_hc_host", []string{
+		`ALTER TABLE rules ADD COLUMN hc_host TEXT DEFAULT ''`,
+	}},
 }
 
 func migrate() error {

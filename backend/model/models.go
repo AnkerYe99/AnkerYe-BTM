@@ -19,6 +19,7 @@ type Rule struct {
 	HCInterval   int            `json:"hc_interval"`
 	HCTimeout    int            `json:"hc_timeout"`
 	HCPath       string         `json:"hc_path"`
+	HCHost       string         `json:"hc_host"`
 	HCRise       int            `json:"hc_rise"`
 	HCFall       int            `json:"hc_fall"`
 	LogMaxSize      string         `json:"log_max_size"`

@@ -71,6 +71,7 @@ type syncRule struct {
 	HcInterval     int64        `json:"hc_interval"`
 	HcTimeout      int64        `json:"hc_timeout"`
 	HcPath         string       `json:"hc_path"`
+	HcHost         string       `json:"hc_host"`
 	HcFall         int64        `json:"hc_fall"`
 	HcRise         int64        `json:"hc_rise"`
 	LogMaxSize     string       `json:"log_max_size"`
@@ -393,9 +394,9 @@ func upsertRules(rules []syncRule) {
 		}
 		db.DB.Exec(`INSERT INTO rules(id,name,protocol,listen_port,listen_stack,
 			https_enabled,https_port,server_name,lb_method,ssl_cert_id,ssl_redirect,
-			hc_enabled,hc_interval,hc_timeout,hc_path,hc_fall,hc_rise,
+			hc_enabled,hc_interval,hc_timeout,hc_path,hc_host,hc_fall,hc_rise,
 			log_max_size,capture_max_size,custom_config,capture_body,status)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 			ON CONFLICT(id) DO UPDATE SET
 			name=excluded.name, protocol=excluded.protocol, listen_port=excluded.listen_port,
 			listen_stack=excluded.listen_stack, https_enabled=excluded.https_enabled,
@@ -403,13 +404,14 @@ func upsertRules(rules []syncRule) {
 			lb_method=excluded.lb_method, ssl_cert_id=excluded.ssl_cert_id,
 			ssl_redirect=excluded.ssl_redirect, hc_enabled=excluded.hc_enabled,
 			hc_interval=excluded.hc_interval, hc_timeout=excluded.hc_timeout,
-			hc_path=excluded.hc_path, hc_fall=excluded.hc_fall, hc_rise=excluded.hc_rise,
+			hc_path=excluded.hc_path, hc_host=excluded.hc_host,
+			hc_fall=excluded.hc_fall, hc_rise=excluded.hc_rise,
 			log_max_size=excluded.log_max_size, capture_max_size=excluded.capture_max_size,
 			custom_config=excluded.custom_config, capture_body=excluded.capture_body,
 			status=excluded.status`,
 			r.ID, r.Name, r.Protocol, r.ListenPort, r.ListenStack,
 			r.HttpsEnabled, r.HttpsPort, r.ServerName, r.LbMethod, sslCertID, r.SslRedirect,
-			r.HcEnabled, r.HcInterval, r.HcTimeout, r.HcPath, r.HcFall, r.HcRise,
+			r.HcEnabled, r.HcInterval, r.HcTimeout, r.HcPath, r.HcHost, r.HcFall, r.HcRise,
 			r.LogMaxSize, captureMaxSize, r.CustomConfig, r.CaptureBody, r.Status)
 
 		db.DB.Exec(`DELETE FROM upstream_servers WHERE rule_id=?`, r.ID)

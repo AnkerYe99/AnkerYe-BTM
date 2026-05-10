@@ -28,7 +28,7 @@ func Probe(s *model.Server, r *model.Rule) ProbeResult {
 	switch r.Protocol {
 	case "http", "https":
 		// SSL 卸载模式下后端是 HTTP，所以始终用 HTTP 探测
-		return probeHTTP(addr, "http", r.HCPath, timeout, start)
+		return probeHTTP(addr, "http", r.HCPath, r.HCHost, timeout, start)
 	case "tcp":
 		return probeTCP(addr, timeout, start)
 	case "udp":
@@ -43,7 +43,7 @@ func Probe(s *model.Server, r *model.Rule) ProbeResult {
 	return ProbeResult{OK: false, Err: "unknown protocol"}
 }
 
-func probeHTTP(addr, proto, path string, timeout time.Duration, start time.Time) ProbeResult {
+func probeHTTP(addr, proto, path, hcHost string, timeout time.Duration, start time.Time) ProbeResult {
 	if path == "" {
 		path = "/"
 	}
@@ -51,23 +51,33 @@ func probeHTTP(addr, proto, path string, timeout time.Duration, start time.Time)
 	if proto == "https" {
 		scheme = "https"
 	}
-	url := fmt.Sprintf("%s://%s%s", scheme, addr, path)
+	rawURL := fmt.Sprintf("%s://%s%s", scheme, addr, path)
 
 	client := &http.Client{
 		Timeout: timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse // 不跟随重定向，3xx 直接算健康
+		},
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			DialContext: (&net.Dialer{Timeout: timeout}).DialContext,
 		},
 	}
-	resp, err := client.Get(url)
+	req, err := http.NewRequest("GET", rawURL, nil)
+	if err != nil {
+		return ProbeResult{OK: false, Latency: int(time.Since(start).Milliseconds()), Err: err.Error()}
+	}
+	if hcHost != "" {
+		req.Host = hcHost
+	}
+	resp, err := client.Do(req)
 	latency := int(time.Since(start).Milliseconds())
 	if err != nil {
 		return ProbeResult{OK: false, Latency: latency, Err: err.Error()}
 	}
 	defer resp.Body.Close()
-	// 4xx 说明服务器在线只是拒绝该路径，5xx 才是真正故障
-	if resp.StatusCode < 500 {
+	// 2xx / 3xx = 在线；4xx / 5xx = 故障（4xx 通常意味着 vhost 未配置或服务未就绪）
+	if resp.StatusCode < 400 {
 		return ProbeResult{OK: true, Latency: latency}
 	}
 	return ProbeResult{OK: false, Latency: latency, Err: fmt.Sprintf("status=%d", resp.StatusCode)}

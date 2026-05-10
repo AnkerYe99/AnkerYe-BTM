@@ -82,6 +82,10 @@
           <el-form-item v-if="isHTTP" label="检查路径">
             <el-input v-model="form.hc_path" placeholder="/" />
           </el-form-item>
+          <el-form-item v-if="isHTTP" label="检查 Host">
+            <el-input v-model="form.hc_host" placeholder="留空=不设置 Host 头，填域名可精确匹配 vhost（推荐填写）" />
+            <div style="color:#999;font-size:12px;margin-top:4px">填写后健康检查会携带该域名作为 Host 请求头；仅当后端返回 2xx/3xx 才视为健康</div>
+          </el-form-item>
           <el-form-item label="连续失败下线"><el-input-number v-model="form.hc_fall" :min="1" :max="10" /></el-form-item>
           <el-form-item label="连续成功恢复"><el-input-number v-model="form.hc_rise" :min="1" :max="10" /></el-form-item>
         </template>
@@ -177,7 +181,7 @@ const form = ref({
   https_enabled: 0, https_port: 443, ssl_cert_id: null, ssl_redirect: 0,
   server_name: '',
   lb_method: 'round_robin',
-  hc_enabled: 1, hc_interval: 10, hc_timeout: 3, hc_path: '/',
+  hc_enabled: 1, hc_interval: 10, hc_timeout: 3, hc_path: '/', hc_host: '',
   hc_rise: 2, hc_fall: 3, log_max_size: '5M', capture_max_size: '5M', custom_config: '',
   capture_body: 0,
   servers: [{ address: '', port: null, weight: 1, state: 'up' }]
