@@ -138,7 +138,7 @@ func checkOnce(ruleID int64) {
 				log.Printf("[health] rule=%d server=%s:%d RECOVERED", r.ID, s.Address, s.Port)
 				clearNotifyDown(s.ID)
 				go engine.SendNotify("notify_server_up",
-					fmt.Sprintf("节点恢复 — %s:%d", s.Address, s.Port),
+					fmt.Sprintf("%s-节点恢复", r.Name),
 					fmt.Sprintf("规则：%s\n节点：%s:%d\n延迟：%dms\n时间：%s",
 						r.Name, s.Address, s.Port, res.Latency, now))
 			}
@@ -155,7 +155,7 @@ func checkOnce(ruleID int64) {
 				log.Printf("[health] rule=%d server=%s:%d DOWN: %s", r.ID, s.Address, s.Port, res.Err)
 				if canNotifyDown(s.ID) {
 					go engine.SendNotify("notify_server_down",
-						fmt.Sprintf("节点下线 — %s:%d", s.Address, s.Port),
+						fmt.Sprintf("%s-节点异常", r.Name),
 						fmt.Sprintf("规则：%s\n节点：%s:%d\n错误：%s\n时间：%s",
 							r.Name, s.Address, s.Port, res.Err, now))
 				}
