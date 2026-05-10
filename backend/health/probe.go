@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"ankerye-flow/model"
@@ -27,8 +28,18 @@ func Probe(s *model.Server, r *model.Rule) ProbeResult {
 
 	switch r.Protocol {
 	case "http", "https":
+		// hc_host 优先；未填时自动取 server_name 第一个有效域名
+		hcHost := r.HCHost
+		if hcHost == "" {
+			for _, d := range strings.Fields(r.ServerName) {
+				if d != "_" && d != "" {
+					hcHost = d
+					break
+				}
+			}
+		}
 		// SSL 卸载模式下后端是 HTTP，所以始终用 HTTP 探测
-		return probeHTTP(addr, "http", r.HCPath, r.HCHost, timeout, start)
+		return probeHTTP(addr, "http", r.HCPath, hcHost, timeout, start)
 	case "tcp":
 		return probeTCP(addr, timeout, start)
 	case "udp":
@@ -76,8 +87,11 @@ func probeHTTP(addr, proto, path, hcHost string, timeout time.Duration, start ti
 		return ProbeResult{OK: false, Latency: latency, Err: err.Error()}
 	}
 	defer resp.Body.Close()
-	// 2xx / 3xx = 在线；4xx / 5xx = 故障（4xx 通常意味着 vhost 未配置或服务未就绪）
-	if resp.StatusCode < 400 {
+	// 2xx / 3xx = 在线
+	// 403 = vhost 已配置但路径禁止访问，服务在运行，视为在线
+	// 404 = vhost 未配置或路径不存在，视为故障
+	// 5xx = 服务器错误，视为故障
+	if resp.StatusCode < 400 || resp.StatusCode == 403 {
 		return ProbeResult{OK: true, Latency: latency}
 	}
 	return ProbeResult{OK: false, Latency: latency, Err: fmt.Sprintf("status=%d", resp.StatusCode)}
