@@ -264,6 +264,11 @@ func AutoRenewCheck() {
 		}
 		expire, err := time.Parse("2006-01-02 15:04:05", expireAt)
 		if err != nil {
+			// 兼容 ISO 格式（如导入的证书写成 2026-06-19T18:04:50Z），否则会被静默跳过永不续签
+			expire, err = time.Parse(time.RFC3339, expireAt)
+		}
+		if err != nil {
+			log.Printf("[auto-renew] %s 到期时间无法解析(%q)，已跳过", domain, expireAt)
 			continue
 		}
 		if int(time.Until(expire).Hours()/24) <= 10 {
