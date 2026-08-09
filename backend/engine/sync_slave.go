@@ -201,55 +201,51 @@ func shortV(v string) string {
 //   B:{type}|{value}|{note}|{enabled}
 //   W:{type}|{value}|{note}|{enabled}
 
-func localRulesMD5() string {
+// LocalRulesMD5 计算本节点规则指纹，与主节点 hashRules 必须一致（共用 WriteRuleFP）。
+// 导出是为了让 handler 包的一致性测试能直接比对两条路径。
+func LocalRulesMD5() string {
 	h := md5.New()
 
+	// 指纹格式与主节点 hashRules 共用 engine.WriteRuleFP——不要在这里另写 Fprintf。
 	type row struct {
-		id, listenPort, httpsEnabled, httpsPort, sslCertID, sslRedirect int64
-		hcEnabled, hcInterval, hcTimeout, hcFall, hcRise, status        int64
-		captureBody                                                       int64
-		name, protocol, listenStack, serverName, lbMethod                string
-		hcPath, logMaxSize, captureMaxSize, customConfig                  string
-		sslCertDomain                                                     string
+		fp        RuleFP
+		sslCertID int64
 	}
 
 	var rules []row
 	rrows, _ := db.DB.Query(`SELECT id,name,protocol,listen_port,IFNULL(listen_stack,'both'),
 		https_enabled,IFNULL(https_port,0),IFNULL(server_name,''),lb_method,
 		IFNULL(ssl_cert_id,0),ssl_redirect,hc_enabled,hc_interval,hc_timeout,
-		IFNULL(hc_path,'/'),hc_fall,hc_rise,IFNULL(log_max_size,'5M'),
-		IFNULL(capture_max_size,'5M'),IFNULL(custom_config,''),IFNULL(capture_body,0),status FROM rules ORDER BY id ASC`)
+		IFNULL(hc_path,'/'),IFNULL(hc_host,''),hc_fall,hc_rise,IFNULL(log_max_size,'5M'),
+		IFNULL(capture_max_size,'5M'),IFNULL(custom_config,''),IFNULL(capture_body,0),
+		IFNULL(ip_acl_mode,'off'),IFNULL(ip_acl_list,''),status FROM rules ORDER BY id ASC`)
 	if rrows != nil {
 		for rrows.Next() {
 			var r row
-			rrows.Scan(&r.id, &r.name, &r.protocol, &r.listenPort, &r.listenStack,
-				&r.httpsEnabled, &r.httpsPort, &r.serverName, &r.lbMethod,
-				&r.sslCertID, &r.sslRedirect, &r.hcEnabled, &r.hcInterval, &r.hcTimeout,
-				&r.hcPath, &r.hcFall, &r.hcRise, &r.logMaxSize,
-				&r.captureMaxSize, &r.customConfig, &r.captureBody, &r.status)
+			rrows.Scan(&r.fp.ID, &r.fp.Name, &r.fp.Protocol, &r.fp.ListenPort, &r.fp.ListenStack,
+				&r.fp.HTTPSEnabled, &r.fp.HTTPSPort, &r.fp.ServerName, &r.fp.LBMethod,
+				&r.sslCertID, &r.fp.SSLRedirect, &r.fp.HCEnabled, &r.fp.HCInterval, &r.fp.HCTimeout,
+				&r.fp.HCPath, &r.fp.HCHost, &r.fp.HCFall, &r.fp.HCRise, &r.fp.LogMaxSize,
+				&r.fp.CaptureMaxSize, &r.fp.CustomConfig, &r.fp.CaptureBody,
+				&r.fp.IPACLMode, &r.fp.IPACLList, &r.fp.Status)
 			rules = append(rules, r)
 		}
 		rrows.Close()
 	}
 
-	type srow struct{ address, state string; port, weight int64 }
 	for _, r := range rules {
 		if r.sslCertID > 0 {
-			db.DB.QueryRow(`SELECT domain FROM ssl_certs WHERE id=?`, r.sslCertID).Scan(&r.sslCertDomain)
+			db.DB.QueryRow(`SELECT domain FROM ssl_certs WHERE id=?`, r.sslCertID).Scan(&r.fp.SSLCertDomain)
 		}
-		fmt.Fprintf(h, "R:%d|%q|%q|%d|%q|%d|%d|%q|%q|%q|%d|%d|%d|%d|%q|%d|%d|%q|%q|%q|%d|%d\n",
-			r.id, r.name, r.protocol, r.listenPort, r.listenStack,
-			r.httpsEnabled, r.httpsPort, r.serverName, r.lbMethod,
-			r.sslCertDomain, r.sslRedirect, r.hcEnabled, r.hcInterval, r.hcTimeout,
-			r.hcPath, r.hcFall, r.hcRise, r.logMaxSize, r.captureMaxSize, r.customConfig, r.captureBody, r.status)
+		WriteRuleFP(h, r.fp)
 
 		srows, _ := db.DB.Query(`SELECT address,port,weight,state FROM upstream_servers
-			WHERE rule_id=? ORDER BY address ASC, port ASC`, r.id)
+			WHERE rule_id=? ORDER BY address ASC, port ASC`, r.fp.ID)
 		if srows != nil {
 			for srows.Next() {
-				var s srow
-				srows.Scan(&s.address, &s.port, &s.weight, &s.state)
-				fmt.Fprintf(h, "S:%q|%d|%d|%q\n", s.address, s.port, s.weight, s.state)
+				var s ServerFP
+				srows.Scan(&s.Address, &s.Port, &s.Weight, &s.State)
+				WriteServerFP(h, s)
 			}
 			srows.Close()
 		}
@@ -320,7 +316,7 @@ func StartSlaveRulesSyncAgent() {
 func pullAndApplyRules(masterURL, token string) error {
 	masterURL = strings.TrimRight(masterURL, "/")
 
-	localMD5 := localRulesMD5()
+	localMD5 := LocalRulesMD5()
 	reqURL := fmt.Sprintf("%s/api/v1/sync/rules_export?token=%s&md5=%s", masterURL, token, localMD5)
 
 	resp, err := syncHTTPClient.Get(reqURL)

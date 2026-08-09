@@ -143,16 +143,27 @@ func queryRulesForExport() []ruleForExport {
 	return rules
 }
 
+// hashRules 计算主节点侧的规则指纹。
+// 格式定义在 engine.WriteRuleFP，与从节点 engine.LocalRulesMD5 共用——不要在这里另写 Fprintf。
 func hashRules(rules []ruleForExport) string {
 	h := md5.New()
 	for _, r := range rules {
-		fmt.Fprintf(h, "R:%d|%q|%q|%d|%q|%d|%d|%q|%q|%q|%d|%d|%d|%d|%q|%q|%d|%d|%q|%q|%q|%d|%d\n",
-			r.ID, r.Name, r.Protocol, r.ListenPort, r.ListenStack,
-			r.HttpsEnabled, r.HttpsPort, r.ServerName, r.LbMethod,
-			r.SslCertDomain, r.SslRedirect, r.HcEnabled, r.HcInterval, r.HcTimeout,
-			r.HcPath, r.HcHost, r.HcFall, r.HcRise, r.LogMaxSize, r.CaptureMaxSize, r.CustomConfig, r.CaptureBody, r.Status)
+		engine.WriteRuleFP(h, engine.RuleFP{
+			ID: r.ID, Name: r.Name, Protocol: r.Protocol,
+			ListenPort: r.ListenPort, ListenStack: r.ListenStack,
+			HTTPSEnabled: r.HttpsEnabled, HTTPSPort: r.HttpsPort,
+			ServerName: r.ServerName, LBMethod: r.LbMethod,
+			SSLCertDomain: r.SslCertDomain, SSLRedirect: r.SslRedirect,
+			HCEnabled: r.HcEnabled, HCInterval: r.HcInterval, HCTimeout: r.HcTimeout,
+			HCPath: r.HcPath, HCHost: r.HcHost, HCFall: r.HcFall, HCRise: r.HcRise,
+			LogMaxSize: r.LogMaxSize, CaptureMaxSize: r.CaptureMaxSize,
+			CustomConfig: r.CustomConfig, CaptureBody: r.CaptureBody,
+			IPACLMode: r.IPACLMode, IPACLList: r.IPACLList, Status: r.Status,
+		})
 		for _, s := range r.Servers {
-			fmt.Fprintf(h, "S:%q|%d|%d|%q\n", s.Address, s.Port, s.Weight, s.State)
+			engine.WriteServerFP(h, engine.ServerFP{
+				Address: s.Address, Port: s.Port, Weight: s.Weight, State: s.State,
+			})
 		}
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
