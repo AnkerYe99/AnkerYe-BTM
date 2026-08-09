@@ -65,7 +65,8 @@ func TestFingerprintChangesOnFieldUpdate(t *testing.T) {
 		{"custom_config", `UPDATE rules SET custom_config='add_header X-T 1;' WHERE id=1`},
 		{"server_name", `UPDATE rules SET server_name='b.example.com' WHERE id=1`},
 		{"status", `UPDATE rules SET status=0 WHERE id=1`},
-		{"upstream", `UPDATE upstream_servers SET weight=9 WHERE rule_id=1 AND address='10.0.0.1'`},
+		{"upstream_weight", `UPDATE upstream_servers SET weight=9 WHERE rule_id=1 AND address='10.0.0.1'`},
+		{"upstream_disabled", `UPDATE upstream_servers SET state='disabled' WHERE rule_id=1 AND address='10.0.0.1'`},
 	}
 	seen := map[string]string{base: "初始"}
 	for _, c := range cases {
@@ -82,5 +83,30 @@ func TestFingerprintChangesOnFieldUpdate(t *testing.T) {
 		if slave := engine.LocalRulesMD5(); slave != got {
 			t.Errorf("改动 %s 后主从指纹分叉\n主: %s\n从: %s", c.name, got, slave)
 		}
+	}
+}
+
+// 健康检查结果（up/down）绝不能影响指纹。
+// 127.0.0.1 这类地址在每台节点上指向各自本机，探测结果必然不同；
+// 若它进了指纹，从节点会永远拉不收敛——1107 就是这么卡了 70 分钟、14 轮全量拉。
+func TestFingerprintIgnoresHealthState(t *testing.T) {
+	setupFPDB(t)
+
+	db.DB.Exec(`UPDATE upstream_servers SET state='up'`)
+	up := hashRules(queryRulesForExport())
+
+	db.DB.Exec(`UPDATE upstream_servers SET state='down'`)
+	down := hashRules(queryRulesForExport())
+	if up != down {
+		t.Errorf("up/down 改变了指纹——从节点将永远无法与主节点收敛\nup:   %s\ndown: %s", up, down)
+	}
+	if slave := engine.LocalRulesMD5(); slave != down {
+		t.Errorf("主从指纹分叉\n主: %s\n从: %s", down, slave)
+	}
+
+	// 但人工 disabled 是配置，必须参与比对
+	db.DB.Exec(`UPDATE upstream_servers SET state='disabled' WHERE rule_id=1 AND address='10.0.0.1'`)
+	if dis := hashRules(queryRulesForExport()); dis == down {
+		t.Error("disabled 未改变指纹——人工禁用节点不会同步到从节点")
 	}
 }

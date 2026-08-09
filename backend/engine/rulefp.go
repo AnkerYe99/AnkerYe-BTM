@@ -64,6 +64,17 @@ func WriteRuleFP(w io.Writer, r RuleFP) {
 }
 
 // WriteServerFP 写入一个上游节点的指纹行，紧跟其所属规则行之后，按 address ASC, port ASC 排序。
+//
+// ⚠️ state 只区分 disabled / 非 disabled，不能把 up/down 原样写进去：
+// up/down 是各节点本地健康检查的运行时结果，天然会不一样——最典型的是 127.0.0.1 这类地址，
+// 它在每台节点上指向的是各自本机的服务，探测结果必然不同。
+// 一旦 up/down 进了指纹，主从就永远不相等：从节点每轮全量拉 → 覆盖本地 state →
+// 本地健康检查又改回来 → 下一轮继续拉，形成永不收敛的震荡。
+// 而 disabled 是人工配置、需要跨节点一致，必须参与比对。
 func WriteServerFP(w io.Writer, s ServerFP) {
-	fmt.Fprintf(w, "S:%q|%d|%d|%q\n", s.Address, s.Port, s.Weight, s.State)
+	state := s.State
+	if state != "disabled" {
+		state = "enabled"
+	}
+	fmt.Fprintf(w, "S:%q|%d|%d|%q\n", s.Address, s.Port, s.Weight, state)
 }
