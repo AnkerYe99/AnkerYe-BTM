@@ -25,3 +25,8 @@ deploy/*.tar.gz
 # OS
 .DS_Store
 *.swp
+
+# 编译产物（根目录）——曾因未 ignore 被 git add -A 提交进来，撑大仓库
+/ankerye-flow-server-amd64
+/ankerye-flow-server-arm64
+/ankerye-flow-server
