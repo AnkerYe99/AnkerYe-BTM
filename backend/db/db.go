@@ -308,7 +308,11 @@ var versionedMigrations = []struct {
 	{7, "add_hc_host", []string{
 		`ALTER TABLE rules ADD COLUMN hc_host TEXT DEFAULT ''`,
 	}},
-	{8, "add_rule_ip_acl", []string{
+	// ⚠️ 版本号从 8 跳到 9：生产库里 v8 已被 add_blacklist_ttl 占用
+	// （2026-07-01 的 WAF 修复，给 filter_blacklist 加 expires_at，那次源码未提交到本仓库）。
+	// migrate() 按 "version <= current 就跳过" 推进，若这里仍写 8，
+	// 在已升过那一版的机器上本迁移会被静默跳过，字段加不上，服务起来后查 rules 直接报 no such column。
+	{9, "add_rule_ip_acl", []string{
 		// 规则级 IP 访问控制：off=不限制 / allow=仅允许名单内 / deny=拒绝名单内
 		`ALTER TABLE rules ADD COLUMN ip_acl_mode TEXT DEFAULT 'off'`,
 		// IP/CIDR 名单，一行一条（也兼容逗号分隔），写入前后端均严格校验格式
