@@ -36,6 +36,8 @@ type ruleReq struct {
 	CaptureMaxSize string       `json:"capture_max_size"`
 	CustomConfig   string       `json:"custom_config"`
 	CaptureBody    int          `json:"capture_body"`
+	IPACLMode      string       `json:"ip_acl_mode"` // off / allow / deny
+	IPACLList      string       `json:"ip_acl_list"` // IP/CIDR 名单，一行一条
 	Servers      []serverItem `json:"servers"`
 }
 
@@ -147,11 +149,13 @@ func CreateRule(c *gin.Context) {
 	res, err := tx.Exec(`INSERT INTO rules(name,protocol,listen_port,listen_stack,
 		https_enabled,https_port,server_name,lb_method,
 		ssl_cert_id,ssl_redirect,hc_enabled,hc_interval,hc_timeout,hc_path,hc_host,hc_rise,hc_fall,
-		log_max_size,capture_max_size,custom_config,capture_body) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		log_max_size,capture_max_size,custom_config,capture_body,
+		ip_acl_mode,ip_acl_list) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		req.Name, req.Protocol, req.ListenPort, req.ListenStack,
 		req.HTTPSEnabled, httpsPort, req.ServerName, req.LBMethod,
 		sslCertID, req.SSLRedirect, req.HCEnabled, req.HCInterval, req.HCTimeout,
-		req.HCPath, req.HCHost, req.HCRise, req.HCFall, req.LogMaxSize, req.CaptureMaxSize, req.CustomConfig, req.CaptureBody)
+		req.HCPath, req.HCHost, req.HCRise, req.HCFall, req.LogMaxSize, req.CaptureMaxSize, req.CustomConfig, req.CaptureBody,
+		req.IPACLMode, req.IPACLList)
 	if err != nil {
 		tx.Rollback()
 		util.Fail(c, 500, err.Error())
@@ -211,12 +215,14 @@ func UpdateRule(c *gin.Context) {
 	_, err := tx.Exec(`UPDATE rules SET name=?,protocol=?,listen_port=?,listen_stack=?,
 		https_enabled=?,https_port=?,server_name=?,lb_method=?,
 		ssl_cert_id=?,ssl_redirect=?,hc_enabled=?,hc_interval=?,hc_timeout=?,hc_path=?,hc_host=?,
-		hc_rise=?,hc_fall=?,log_max_size=?,capture_max_size=?,custom_config=?,capture_body=?,updated_at=datetime('now','localtime')
+		hc_rise=?,hc_fall=?,log_max_size=?,capture_max_size=?,custom_config=?,capture_body=?,
+		ip_acl_mode=?,ip_acl_list=?,updated_at=datetime('now','localtime')
 		WHERE id=?`,
 		req.Name, req.Protocol, req.ListenPort, req.ListenStack,
 		req.HTTPSEnabled, httpsPort, req.ServerName, req.LBMethod, sslCertID,
 		req.SSLRedirect, req.HCEnabled, req.HCInterval, req.HCTimeout, req.HCPath, req.HCHost,
-		req.HCRise, req.HCFall, req.LogMaxSize, req.CaptureMaxSize, req.CustomConfig, req.CaptureBody, id)
+		req.HCRise, req.HCFall, req.LogMaxSize, req.CaptureMaxSize, req.CustomConfig, req.CaptureBody,
+		req.IPACLMode, req.IPACLList, id)
 	if err != nil {
 		tx.Rollback()
 		util.Fail(c, 500, err.Error())
@@ -330,6 +336,23 @@ func validateRule(r *ruleReq) error {
 	}
 	if len(r.Servers) == 0 {
 		return errMsg("至少需要一个后端节点")
+	}
+	// 规则级 IP 访问控制
+	validACL := map[string]bool{"": true, "off": true, "allow": true, "deny": true}
+	if !validACL[r.IPACLMode] {
+		return errMsg("ip_acl_mode 必须是 off/allow/deny")
+	}
+	if r.IPACLMode == "allow" || r.IPACLMode == "deny" {
+		if r.Protocol != "http" {
+			return errMsg("IP 访问控制目前仅支持 HTTP/HTTPS 规则")
+		}
+		items, bad := engine.ParseIPACL(r.IPACLList)
+		if len(bad) > 0 {
+			return errMsg("IP 名单格式错误: " + strings.Join(bad, ", ") + "（只能填 IP 或 CIDR，如 1.2.3.4 或 118.143.68.96/28）")
+		}
+		if len(items) == 0 {
+			return errMsg("启用 IP 访问控制时，名单不能为空")
+		}
 	}
 	return nil
 }
@@ -470,6 +493,17 @@ func fillDefaults(r *ruleReq) {
 	}
 	if r.CaptureMaxSize == "" {
 		r.CaptureMaxSize = "5M"
+	}
+	if r.IPACLMode == "" {
+		r.IPACLMode = "off"
+	}
+	if r.IPACLMode == "off" {
+		// 关闭时不保留残留名单，避免下次开启时误用旧数据
+		r.IPACLList = ""
+	} else {
+		// 落库前归一化：去掉非法/重复条目，统一成一行一条
+		items, _ := engine.ParseIPACL(r.IPACLList)
+		r.IPACLList = strings.Join(items, "\n")
 	}
 }
 

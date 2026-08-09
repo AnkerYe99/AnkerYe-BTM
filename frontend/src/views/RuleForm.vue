@@ -131,6 +131,33 @@
         </el-table>
         <el-button size="small" icon="Plus" @click="addServer" style="margin-top:8px">添加节点</el-button>
 
+        <template v-if="isHTTP">
+          <el-divider>访问控制</el-divider>
+          <el-form-item label="IP 限制">
+            <el-radio-group v-model="form.ip_acl_mode">
+              <el-radio-button label="off">不限制</el-radio-button>
+              <el-radio-button label="allow">白名单（仅允许名单内）</el-radio-button>
+              <el-radio-button label="deny">黑名单（拒绝名单内）</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item v-if="form.ip_acl_mode !== 'off'" label="IP / CIDR 名单" required>
+            <el-input
+              v-model="form.ip_acl_list"
+              type="textarea"
+              :rows="5"
+              placeholder="一行一条，例如：&#10;118.143.68.96/28&#10;161.153.89.153&#10;2001:db8::/32"
+            />
+            <div style="color:#999;font-size:12px;margin-top:4px;line-height:1.7">
+              只能填 IP 或 CIDR 网段，一行一条（也支持逗号分隔），<code>#</code> 开头为注释。<br />
+              匹配的是<strong>访客真实 IP</strong>（已做 real_ip 还原），被拒绝时返回 <strong>403</strong>。<br />
+              <strong style="color:#e6a23c">注意：白名单模式下，不在名单里的所有来源都会被拒绝，请先确认自己的出口 IP 已加入，避免把自己关在门外。</strong>
+              <template v-if="form.ssl_redirect === 1">
+                <br /><strong style="color:#e6a23c">当前已开启 HTTP→HTTPS 跳转：HTTP 端口会先 301 跳转，IP 限制在跳转后的 HTTPS 端口上生效。</strong>
+              </template>
+            </div>
+          </el-form-item>
+        </template>
+
         <el-divider>高级</el-divider>
         <el-form-item label="记录请求体">
           <el-switch v-model="form.capture_body" :active-value="1" :inactive-value="0" />
@@ -187,6 +214,7 @@ const form = ref({
   hc_enabled: 1, hc_interval: 10, hc_timeout: 3, hc_path: '/', hc_host: '',
   hc_rise: 2, hc_fall: 3, log_max_size: '5M', capture_max_size: '5M', custom_config: '',
   capture_body: 0,
+  ip_acl_mode: 'off', ip_acl_list: '',
   servers: [{ address: '', port: null, weight: 1, state: 'up' }]
 })
 
@@ -215,6 +243,29 @@ function formToMode(protocol, httpsEnabled, listenPort) {
   return 'http'
 }
 
+// IP / CIDR 校验：这里只做即时提示，最终以后端 net.ParseIP/ParseCIDR 的严格校验为准
+function isIPv4(s) {
+  const p = s.split('.')
+  return p.length === 4 && p.every(x => /^\d{1,3}$/.test(x) && +x <= 255)
+}
+function isIPv6(s) {
+  if (!s.includes(':')) return false
+  if ((s.match(/::/g) || []).length > 1) return false
+  return /^[0-9a-fA-F:.]+$/.test(s)
+}
+function isIPOrCIDR(s) {
+  let addr = s, prefix = null
+  const slash = s.indexOf('/')
+  if (slash >= 0) {
+    addr = s.slice(0, slash)
+    prefix = s.slice(slash + 1)
+    if (!/^\d{1,3}$/.test(prefix)) return false
+  }
+  if (isIPv4(addr)) return prefix === null || +prefix <= 32
+  if (isIPv6(addr)) return prefix === null || +prefix <= 128
+  return false
+}
+
 async function submit() {
   if (!form.value.name) return ElMessage.warning('请输入规则名称')
   if (form.value.servers.length === 0) return ElMessage.warning('至少一个后端节点')
@@ -234,6 +285,28 @@ async function submit() {
   }
   if (payload.https_enabled !== 1) {
     payload.https_port = null; payload.ssl_cert_id = null; payload.ssl_redirect = 0
+  }
+
+  // IP 访问控制：仅 HTTP 规则支持，其余协议一律清空
+  if (payload.protocol !== 'http') {
+    payload.ip_acl_mode = 'off'; payload.ip_acl_list = ''
+  }
+  if (payload.ip_acl_mode === 'off') {
+    payload.ip_acl_list = ''
+  } else {
+    // 先按行剥掉注释再拆条目：注释里常带空格，直接按空格切会把 "# 内网段" 拆成两个"条目"
+    const items = [...new Set(
+      (payload.ip_acl_list || '')
+        .split('\n')
+        .map(line => line.split('#')[0])
+        .flatMap(line => line.split(/[\r,;\s]+/))
+        .map(s => s.trim())
+        .filter(Boolean)
+    )]
+    if (items.length === 0) return ElMessage.warning('启用 IP 限制时，名单不能为空')
+    const bad = items.filter(s => !isIPOrCIDR(s))
+    if (bad.length > 0) return ElMessage.warning('IP 名单格式错误：' + bad.join('、'))
+    payload.ip_acl_list = items.join('\n')
   }
 
   saving.value = true

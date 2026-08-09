@@ -144,25 +144,27 @@ func Backup(c *gin.Context) {
 	if rows, err := db.DB.Query(`SELECT id,name,protocol,listen_port,
 		IFNULL(listen_stack,'both'),IFNULL(https_enabled,0),IFNULL(https_port,0),
 		IFNULL(server_name,''),lb_method,ssl_cert_id,ssl_redirect,hc_enabled,hc_interval,hc_timeout,
-		IFNULL(hc_path,''),IFNULL(hc_rise,0),IFNULL(hc_fall,0),
+		IFNULL(hc_path,''),IFNULL(hc_host,''),IFNULL(hc_rise,0),IFNULL(hc_fall,0),
 		IFNULL(log_max_size,''),IFNULL(capture_max_size,'5M'),IFNULL(custom_config,''),
-		IFNULL(capture_body,0),status FROM rules ORDER BY id`); err == nil {
+		IFNULL(capture_body,0),IFNULL(ip_acl_mode,'off'),IFNULL(ip_acl_list,''),status FROM rules ORDER BY id`); err == nil {
 		for rows.Next() {
 			var id int64
-			var name, proto, stack, srvName, lbm, hcPath, logSize, captureMaxSize, custom string
+			var name, proto, stack, srvName, lbm, hcPath, hcHost, logSize, captureMaxSize, custom string
+			var aclMode, aclList string
 			var port, httpsEn, httpsPort, sslRed, hcEn, hcInt, hcTo, hcRise, hcFall, captureBody, status int
 			var sslCert interface{}
 			rows.Scan(&id, &name, &proto, &port, &stack, &httpsEn, &httpsPort, &srvName, &lbm, &sslCert,
-				&sslRed, &hcEn, &hcInt, &hcTo, &hcPath, &hcRise, &hcFall, &logSize, &captureMaxSize,
-				&custom, &captureBody, &status)
+				&sslRed, &hcEn, &hcInt, &hcTo, &hcPath, &hcHost, &hcRise, &hcFall, &logSize, &captureMaxSize,
+				&custom, &captureBody, &aclMode, &aclList, &status)
 			data.Rules = append(data.Rules, map[string]interface{}{
 				"id": id, "name": name, "protocol": proto, "listen_port": port,
 				"listen_stack": stack, "https_enabled": httpsEn, "https_port": httpsPort,
 				"server_name": srvName, "lb_method": lbm, "ssl_cert_id": sslCert,
 				"ssl_redirect": sslRed, "hc_enabled": hcEn, "hc_interval": hcInt, "hc_timeout": hcTo,
-				"hc_path": hcPath, "hc_rise": hcRise, "hc_fall": hcFall,
+				"hc_path": hcPath, "hc_host": hcHost, "hc_rise": hcRise, "hc_fall": hcFall,
 				"log_max_size": logSize, "capture_max_size": captureMaxSize,
-				"custom_config": custom, "capture_body": captureBody, "status": status,
+				"custom_config": custom, "capture_body": captureBody,
+				"ip_acl_mode": aclMode, "ip_acl_list": aclList, "status": status,
 			})
 		}
 		rows.Close()
@@ -291,16 +293,21 @@ func Restore(c *gin.Context) {
 		if captureMaxSize == "" {
 			captureMaxSize = "5M"
 		}
+		aclMode, _ := m["ip_acl_mode"].(string)
+		if aclMode != "allow" && aclMode != "deny" {
+			aclMode = "off"
+		}
 		tx.Exec(`INSERT OR IGNORE INTO rules(id,name,protocol,listen_port,listen_stack,https_enabled,https_port,
-			server_name,lb_method,ssl_cert_id,ssl_redirect,hc_enabled,hc_interval,hc_timeout,hc_path,
-			hc_rise,hc_fall,log_max_size,capture_max_size,custom_config,capture_body,status)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			server_name,lb_method,ssl_cert_id,ssl_redirect,hc_enabled,hc_interval,hc_timeout,hc_path,hc_host,
+			hc_rise,hc_fall,log_max_size,capture_max_size,custom_config,capture_body,ip_acl_mode,ip_acl_list,status)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			int64v(m["id"]), m["name"], m["protocol"], int64v(m["listen_port"]),
 			m["listen_stack"], int64v(m["https_enabled"]), int64v(m["https_port"]),
 			m["server_name"], m["lb_method"], m["ssl_cert_id"], int64v(m["ssl_redirect"]),
 			int64v(m["hc_enabled"]), int64v(m["hc_interval"]), int64v(m["hc_timeout"]),
-			m["hc_path"], int64v(m["hc_rise"]), int64v(m["hc_fall"]),
+			m["hc_path"], m["hc_host"], int64v(m["hc_rise"]), int64v(m["hc_fall"]),
 			m["log_max_size"], captureMaxSize, m["custom_config"], int64v(m["capture_body"]),
+			aclMode, m["ip_acl_list"],
 			int64v(m["status"]))
 	}
 	// 恢复节点

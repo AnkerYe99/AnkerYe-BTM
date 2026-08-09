@@ -90,6 +90,8 @@ type ruleForExport struct {
 	CaptureMaxSize string
 	CustomConfig   string
 	CaptureBody    int64
+	IPACLMode      string
+	IPACLList      string
 	Status         int64
 	Servers        []serverForExport
 }
@@ -107,7 +109,8 @@ func queryRulesForExport() []ruleForExport {
 		https_enabled,IFNULL(https_port,0),IFNULL(server_name,''),lb_method,
 		IFNULL(ssl_cert_id,0),ssl_redirect,hc_enabled,hc_interval,hc_timeout,
 		IFNULL(hc_path,'/'),IFNULL(hc_host,''),hc_fall,hc_rise,IFNULL(log_max_size,'5M'),
-		IFNULL(capture_max_size,'5M'),IFNULL(custom_config,''),IFNULL(capture_body,0),status
+		IFNULL(capture_max_size,'5M'),IFNULL(custom_config,''),IFNULL(capture_body,0),
+		IFNULL(ip_acl_mode,'off'),IFNULL(ip_acl_list,''),status
 		FROM rules ORDER BY id ASC`)
 	if rrows == nil {
 		return rules
@@ -119,7 +122,7 @@ func queryRulesForExport() []ruleForExport {
 			&r.HttpsEnabled, &r.HttpsPort, &r.ServerName, &r.LbMethod,
 			&r.SslCertID, &r.SslRedirect, &r.HcEnabled, &r.HcInterval, &r.HcTimeout,
 			&r.HcPath, &r.HcHost, &r.HcFall, &r.HcRise, &r.LogMaxSize, &r.CaptureMaxSize,
-			&r.CustomConfig, &r.CaptureBody, &r.Status)
+			&r.CustomConfig, &r.CaptureBody, &r.IPACLMode, &r.IPACLList, &r.Status)
 		rules = append(rules, r)
 	}
 	for i := range rules {
@@ -279,7 +282,8 @@ func SyncExport(c *gin.Context) {
 			"hc_enabled": r.HcEnabled, "hc_interval": r.HcInterval, "hc_timeout": r.HcTimeout,
 			"hc_path": r.HcPath, "hc_host": r.HcHost, "hc_fall": r.HcFall, "hc_rise": r.HcRise,
 			"log_max_size": r.LogMaxSize, "capture_max_size": r.CaptureMaxSize,
-			"custom_config": r.CustomConfig, "capture_body": r.CaptureBody, "status": r.Status,
+			"custom_config": r.CustomConfig, "capture_body": r.CaptureBody,
+			"ip_acl_mode": r.IPACLMode, "ip_acl_list": r.IPACLList, "status": r.Status,
 			"servers": servers,
 		})
 	}
@@ -349,7 +353,8 @@ func SyncRulesExport(c *gin.Context) {
 			"hc_enabled": r.HcEnabled, "hc_interval": r.HcInterval, "hc_timeout": r.HcTimeout,
 			"hc_path": r.HcPath, "hc_host": r.HcHost, "hc_fall": r.HcFall, "hc_rise": r.HcRise,
 			"log_max_size": r.LogMaxSize, "capture_max_size": r.CaptureMaxSize,
-			"custom_config": r.CustomConfig, "capture_body": r.CaptureBody, "status": r.Status,
+			"custom_config": r.CustomConfig, "capture_body": r.CaptureBody,
+			"ip_acl_mode": r.IPACLMode, "ip_acl_list": r.IPACLList, "status": r.Status,
 			"servers": servers,
 		})
 	}

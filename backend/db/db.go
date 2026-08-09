@@ -308,6 +308,12 @@ var versionedMigrations = []struct {
 	{7, "add_hc_host", []string{
 		`ALTER TABLE rules ADD COLUMN hc_host TEXT DEFAULT ''`,
 	}},
+	{8, "add_rule_ip_acl", []string{
+		// 规则级 IP 访问控制：off=不限制 / allow=仅允许名单内 / deny=拒绝名单内
+		`ALTER TABLE rules ADD COLUMN ip_acl_mode TEXT DEFAULT 'off'`,
+		// IP/CIDR 名单，一行一条（也兼容逗号分隔），写入前后端均严格校验格式
+		`ALTER TABLE rules ADD COLUMN ip_acl_list TEXT DEFAULT ''`,
+	}},
 }
 
 func migrate() error {

@@ -26,6 +26,8 @@ type Rule struct {
 	CaptureMaxSize  string         `json:"capture_max_size"`
 	CustomConfig    string         `json:"custom_config"`
 	CaptureBody     int            `json:"capture_body"`
+	IPACLMode       string         `json:"ip_acl_mode"` // off / allow / deny
+	IPACLList       string         `json:"ip_acl_list"` // IP/CIDR 名单，一行一条
 	Status       int            `json:"status"`
 	CreatedAt    string         `json:"created_at"`
 	UpdatedAt    string         `json:"updated_at"`

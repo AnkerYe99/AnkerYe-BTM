@@ -112,12 +112,14 @@ func LoadRule(ruleID int64) (*model.Rule, error) {
 	row := db.DB.QueryRow(`SELECT id,name,protocol,listen_port,IFNULL(listen_stack,'both'),
 		https_enabled,https_port,server_name,lb_method,ssl_cert_id,ssl_redirect,
 		hc_enabled,hc_interval,hc_timeout,hc_path,IFNULL(hc_host,''),hc_rise,hc_fall,
-		log_max_size,IFNULL(capture_max_size,'5M'),custom_config,IFNULL(capture_body,0),status,created_at,updated_at
+		log_max_size,IFNULL(capture_max_size,'5M'),custom_config,IFNULL(capture_body,0),
+		IFNULL(ip_acl_mode,'off'),IFNULL(ip_acl_list,''),status,created_at,updated_at
 		FROM rules WHERE id=?`, ruleID)
 	err := row.Scan(&r.ID, &r.Name, &r.Protocol, &r.ListenPort, &stack,
 		&r.HTTPSEnabled, &httpsPort, &r.ServerName, &r.LBMethod,
 		&certID, &r.SSLRedirect, &r.HCEnabled, &r.HCInterval, &r.HCTimeout, &r.HCPath, &r.HCHost,
-		&r.HCRise, &r.HCFall, &r.LogMaxSize, &r.CaptureMaxSize, &r.CustomConfig, &r.CaptureBody, &r.Status, &r.CreatedAt, &r.UpdatedAt)
+		&r.HCRise, &r.HCFall, &r.LogMaxSize, &r.CaptureMaxSize, &r.CustomConfig, &r.CaptureBody,
+		&r.IPACLMode, &r.IPACLList, &r.Status, &r.CreatedAt, &r.UpdatedAt)
 	if stack.Valid {
 		r.ListenStack = stack.String
 	}
@@ -190,6 +192,99 @@ func filterCheckBlock() string {
 `
 }
 
+// ParseIPACL 解析并严格校验规则级 IP 访问控制名单。
+// 名单会被直接写进 nginx 配置文件，必须逐条校验后才能拼接——绝不能把用户输入原样落盘，
+// 否则一行 "1.2.3.4; } server { ..." 就能注入任意 nginx 指令。
+// 支持换行 / 逗号 / 分号 / 空格分隔，以 # 开头的行视为注释。
+// 返回：valid=合法且去重后的条目（保持输入顺序），invalid=格式非法的原始条目。
+func ParseIPACL(list string) (valid []string, invalid []string) {
+	seen := map[string]bool{}
+	for _, line := range strings.Split(list, "\n") {
+		// 必须先按行剥掉注释再拆条目：注释里通常带空格，
+		// 若先按空格切分，"# 内网段" 会被拆成 "#" 和 "内网段"，后者就成了"非法条目"。
+		if i := strings.Index(line, "#"); i >= 0 {
+			line = line[:i]
+		}
+		fields := strings.FieldsFunc(line, func(r rune) bool {
+			return r == '\r' || r == ',' || r == ';' || r == ' ' || r == '\t'
+		})
+		for _, raw := range fields {
+			item := strings.TrimSpace(raw)
+			if item == "" {
+				continue
+			}
+			if !isIPOrCIDR(item) {
+				invalid = append(invalid, item)
+				continue
+			}
+			if seen[item] {
+				continue
+			}
+			seen[item] = true
+			valid = append(valid, item)
+		}
+	}
+	return valid, invalid
+}
+
+// isIPOrCIDR 仅接受纯 IPv4/IPv6 地址或 CIDR 网段，其余一律拒绝
+func isIPOrCIDR(s string) bool {
+	if strings.Contains(s, "/") {
+		_, _, err := net.ParseCIDR(s)
+		return err == nil
+	}
+	return net.ParseIP(s) != nil
+}
+
+// sanitizeComment 抹掉换行，保证内容不会从 nginx 注释行里逃逸成指令
+func sanitizeComment(s string) string {
+	return strings.NewReplacer("\n", " ", "\r", " ").Replace(s)
+}
+
+// normalizeACLMode 归一化模式值。
+// 老版本主节点同步过来的数据没有这个字段（空串），统一落成 off，避免库里出现两种"关闭"表示。
+func normalizeACLMode(mode string) string {
+	if mode != "allow" && mode != "deny" {
+		return "off"
+	}
+	return mode
+}
+
+// renderIPACL 生成规则级 IP 访问控制指令（ngx_http_access_module）。
+// 写在 server 块级：location 自身没有 allow/deny 时会继承，因此对该规则全部路径生效。
+// 匹配的是 realip 模块还原后的 $remote_addr（realip 在 POST_READ 阶段执行，早于 access 阶段），
+// 所以这里填的是访客真实 IP，而不是上游节点 IP。命中拒绝时 nginx 返回 403。
+func renderIPACL(mode, list string) string {
+	if mode != "allow" && mode != "deny" {
+		return ""
+	}
+	items, bad := ParseIPACL(list)
+	if len(items) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	if len(bad) > 0 {
+		// 正常路径下 handler 已拒绝非法名单，这里兜的是手工改库 / 老版本主节点同步来的脏数据。
+		// 静默丢弃会让"名单写了 5 条只生效 2 条"无处可查，所以落一行注释。
+		// 非法内容只进注释，且先抹掉换行，防止它从注释行里逃逸成指令。
+		sb.WriteString(fmt.Sprintf("    # 警告：以下条目格式非法，已忽略：%s\n", sanitizeComment(strings.Join(bad, " "))))
+	}
+	if mode == "allow" {
+		sb.WriteString("    # AnkerYe - 规则级 IP 访问控制：白名单模式（仅允许以下来源）\n")
+		for _, v := range items {
+			sb.WriteString(fmt.Sprintf("    allow %s;\n", v))
+		}
+		sb.WriteString("    deny all;\n")
+	} else {
+		sb.WriteString("    # AnkerYe - 规则级 IP 访问控制：黑名单模式（拒绝以下来源）\n")
+		for _, v := range items {
+			sb.WriteString(fmt.Sprintf("    deny %s;\n", v))
+		}
+		sb.WriteString("    allow all;\n")
+	}
+	return sb.String()
+}
+
 func proxyBlock(id int64) string {
 	return fmt.Sprintf(`    location / {
         if ($__nf_block) {
@@ -241,6 +336,7 @@ func renderHTTP(r *model.Rule, servers []model.Server) string {
 		sb.WriteString(fmt.Sprintf("    error_log  %s/rule_%d_error.log warn;\n", config.Global.Nginx.LogDir, r.ID))
 
 		sb.WriteString(filterCheckBlock())
+		sb.WriteString(renderIPACL(r.IPACLMode, r.IPACLList))
 		if r.HTTPSEnabled == 1 && r.SSLRedirect == 1 && r.HTTPSPort != nil {
 			if *r.HTTPSPort == 443 {
 				sb.WriteString("    return 301 https://$host$request_uri;\n")
@@ -272,6 +368,7 @@ func renderHTTP(r *model.Rule, servers []model.Server) string {
 		}
 		sb.WriteString(fmt.Sprintf("    error_log  %s/rule_%d_error.log warn;\n", config.Global.Nginx.LogDir, r.ID))
 		sb.WriteString(filterCheckBlock())
+		sb.WriteString(renderIPACL(r.IPACLMode, r.IPACLList))
 		sb.WriteString(proxyBlock(r.ID))
 		if r.CustomConfig != "" {
 			sb.WriteString("    " + r.CustomConfig + "\n")
@@ -491,9 +588,9 @@ func ApplyRule(ruleID int64) error {
 	SyncPortDefaults()
 
 	// 语法验证
-	if out, err := exec.Command("nginx", "-t").CombinedOutput(); err != nil {
+	if out, err := runNginxCmd("-t"); err != nil {
 		os.Remove(path)
-		return fmt.Errorf("nginx 语法错误: %s", string(out))
+		return fmt.Errorf("nginx 语法错误: %s", out)
 	}
 	// reload
 	if err := smartReload(); err != nil {
@@ -552,10 +649,29 @@ func ruleFilePath(ruleID int64, protocol string) string {
 	return filepath.Join(config.Global.Nginx.ConfDir, fmt.Sprintf("%d-%s.conf", ruleID, suffix))
 }
 
+// runNginxCmd 执行 nginx 命令并安全捕获输出。
+// 不能用 CombinedOutput()：它内部用管道收集输出，若子进程（如裸启动的 nginx）
+// fork 出长期存活的 daemon 并继承了管道写端不关闭，Wait() 会永久阻塞在等 EOF 上。
+// 改为把 Stdout/Stderr 指向一个真实文件，Wait() 只等直接子进程退出，不受孙进程影响。
+func runNginxCmd(args ...string) (string, error) {
+	f, ferr := os.CreateTemp("", "nginx-cmd-*.log")
+	if ferr != nil {
+		return "", exec.Command("nginx", args...).Run()
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	cmd := exec.Command("nginx", args...)
+	cmd.Stdout = f
+	cmd.Stderr = f
+	err := cmd.Run()
+	out, _ := os.ReadFile(f.Name())
+	return string(out), err
+}
+
 // 测试当前所有 nginx 配置
 func TestConfig() (string, error) {
-	out, err := exec.Command("nginx", "-t").CombinedOutput()
-	return string(out), err
+	return runNginxCmd("-t")
 }
 
 // nginxRunning 检查 nginx 主进程是否存活
@@ -573,17 +689,17 @@ func nginxRunning() bool {
 
 // smartReload 若 nginx 在跑则 reload，否则 start
 func smartReload() error {
-	var out []byte
+	var out string
 	var err error
 	if nginxRunning() {
-		out, err = exec.Command("nginx", "-s", "reload").CombinedOutput()
+		out, err = runNginxCmd("-s", "reload")
 		if err != nil {
-			return fmt.Errorf("nginx reload 失败: %s", string(out))
+			return fmt.Errorf("nginx reload 失败: %s", out)
 		}
 	} else {
-		out, err = exec.Command("nginx").CombinedOutput()
+		out, err = runNginxCmd()
 		if err != nil {
-			return fmt.Errorf("nginx 启动失败: %s", string(out))
+			return fmt.Errorf("nginx 启动失败: %s", out)
 		}
 	}
 	return nil
