@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"net"
 	"strings"
 	"testing"
 
@@ -142,6 +143,44 @@ func TestRenderIPACL(t *testing.T) {
 	if !strings.Contains(deny, "deny 1.2.3.4;") ||
 		!strings.HasSuffix(strings.TrimRight(deny, "\n"), "allow all;") {
 		t.Errorf("黑名单模式生成有误:\n%s", deny)
+	}
+}
+
+// trustedSources 同时喂给 nginx 的 set_real_ip_from 和 isIPTrusted。
+// 若某条写成裸 IP（漏了 /32），ParseCIDR 会失败，isIPTrusted 会静默跳过它——
+// nginx 那边照样信任，判断就此错位且毫无报错。这个测试把格式钉死。
+func TestTrustedSourcesWellFormed(t *testing.T) {
+	if len(trustedSources) == 0 {
+		t.Fatal("trustedSources 不应为空")
+	}
+	seen := map[string]bool{}
+	for _, s := range trustedSources {
+		if _, _, err := net.ParseCIDR(s.cidr); err != nil {
+			t.Errorf("%q 不是合法 CIDR（裸 IP 要写成 /32）: %v", s.cidr, err)
+		}
+		if s.note == "" {
+			t.Errorf("%q 缺少来源备注", s.cidr)
+		}
+		if seen[s.cidr] {
+			t.Errorf("%q 重复", s.cidr)
+		}
+		seen[s.cidr] = true
+	}
+}
+
+func TestIsIPTrusted(t *testing.T) {
+	trusted := []string{"61.92.38.202", "10.1.2.3", "172.16.0.1", "161.153.89.153"}
+	for _, ip := range trusted {
+		if !isIPTrusted(ip) {
+			t.Errorf("%s 应为可信来源", ip)
+		}
+	}
+	// 1107 换过 IP，旧地址已作废，不该再被信任
+	untrusted := []string{"42.2.33.138", "8.8.8.8", "118.143.68.98", "not-an-ip"}
+	for _, ip := range untrusted {
+		if isIPTrusted(ip) {
+			t.Errorf("%s 不应为可信来源", ip)
+		}
 	}
 }
 

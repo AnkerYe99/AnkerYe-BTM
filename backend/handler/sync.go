@@ -214,8 +214,10 @@ type wlItemForExport struct {
 
 func queryFilterForExport() ([]blItemForExport, []wlItemForExport) {
 	var bl []blItemForExport
+	// #5: 只导出人工维护的规则/黑名单(auto_added=0)，自动封锁(auto_added=1)保持节点本地、不全网传播。
+	// 这样单个节点的误判不会被扇出到全机群；而 path/ua/method 规则仍全网下发，真实攻击在每个节点照样被拦。
 	blrows, _ := db.DB.Query(`SELECT type,value,note,hits,auto_added,enabled
-		FROM filter_blacklist ORDER BY type ASC, value ASC`)
+		FROM filter_blacklist WHERE auto_added=0 ORDER BY type ASC, value ASC`)
 	if blrows != nil {
 		for blrows.Next() {
 			var item blItemForExport

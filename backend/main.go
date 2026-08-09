@@ -53,6 +53,7 @@ func main() {
 	log.Println("[health] workers started")
 	engine.StartStatsWorker()
 	go engine.StartAutoBlockWorker()
+	go engine.StartExpiryWorker()
 	go startCertAutoRenew()
 	go engine.StartSlaveSyncAgent()
 	go engine.StartSlaveRulesSyncAgent()

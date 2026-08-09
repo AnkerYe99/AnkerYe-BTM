@@ -60,21 +60,8 @@ func buildFilterConf() (string, error) {
 
 	// Real IP 穿透：信任所有 BTM 节点，让 $remote_addr 还原为真实客户端 IP
 	sb.WriteString("# --- Real IP 穿透 ---\n")
-	for _, cidr := range []string{
-		"10.0.0.0/8",        // 内网
-		"172.16.0.0/12",     // Docker/内网
-		"61.92.38.202",      // 1107（原 42.2.33.138 已作废）
-		"47.239.137.202",    // ALHK
-		"8.159.153.184",     // ALSH
-		"81.69.185.252",     // TXSH
-		"161.153.89.153",    // 甲骨文1
-		"141.147.179.9",     // 甲骨文2
-		"158.101.89.59",     // 甲骨文3
-		"129.146.250.212",   // 甲骨文4
-		"161.118.230.77",    // 甲骨文5/SG1
-		"168.138.161.90",    // 甲骨文6/SG2
-	} {
-		sb.WriteString(fmt.Sprintf("set_real_ip_from %s;\n", cidr))
+	for _, s := range trustedSources {
+		sb.WriteString(fmt.Sprintf("set_real_ip_from %s;  # %s\n", s.cidr, s.note))
 	}
 	sb.WriteString("real_ip_header    X-Real-IP;\n")
 	sb.WriteString("real_ip_recursive on;\n\n")
@@ -220,20 +207,29 @@ func processAutoBlock(line string) {
 	if net.ParseIP(ip) == nil {
 		return
 	}
-	// 白名单 IP 不自动封锁
-	if isIPWhitelisted(ip) {
+	// #3: 白名单 / 可信来源（set_real_ip_from 信任的 BTM 节点、内网代理）不自动封锁
+	if isIPWhitelisted(ip) || isIPTrusted(ip) {
 		return
 	}
-	note := "自动封锁（" + parseTriggerReason(line) + "）"
+	reason := parseTriggerReason(line)
+	// #14: 只有命中具体 path/ua/method/cidr 规则才自动封锁。
+	// "触发：ip"（该 IP 已在黑名单、这次 444 是本地拦截自身造成）与泛化"触发过滤规则"（无具体命中）
+	// 一律不再封——否则已封 IP 的每个被 444 的请求都会重复刷新封锁，形成永不过期的自反馈死循环。
+	if !isSpecificRuleReason(reason) {
+		return
+	}
+	note := "自动封锁（" + reason + "）"
+	// #4: 自动封锁默认 6 小时 TTL，到期由 StartExpiryWorker 自动解封
 	res, err := db.DB.Exec(
-		`INSERT OR IGNORE INTO filter_blacklist(type,value,note,auto_added) VALUES(?,?,?,1)`,
+		`INSERT OR IGNORE INTO filter_blacklist(type,value,note,auto_added,expires_at)
+		 VALUES(?,?,?,1,datetime('now','localtime','+6 hours'))`,
 		"ip", ip, note,
 	)
 	if err != nil {
 		return
 	}
 	if n, _ := res.RowsAffected(); n > 0 {
-		log.Printf("[filter] auto-blocked IP: %s | %s", ip, note)
+		log.Printf("[filter] auto-blocked IP: %s | %s（6h TTL）", ip, note)
 		go ApplyFilter()
 	}
 }
@@ -262,6 +258,69 @@ func isIPWhitelisted(ip string) bool {
 		}
 	}
 	return false
+}
+
+// isSpecificRuleReason 判断触发原因是否命中了具体的 path/ua/method/cidr 规则。
+// 仅这些才应触发自动封锁；"触发：ip"（已封 IP 自身被 444）与泛化"触发过滤规则"（无具体命中）不封，防自反馈循环(#14)。
+func isSpecificRuleReason(reason string) bool {
+	return strings.HasPrefix(reason, "触发：path") ||
+		strings.HasPrefix(reason, "触发：ua") ||
+		strings.HasPrefix(reason, "触发：method") ||
+		strings.HasPrefix(reason, "触发：cidr")
+}
+
+// trustedSources 是所有 BTM 节点与内网代理的唯一来源清单，两处共用：
+//  1. nginx 的 set_real_ip_from —— 还原 $remote_addr 为访客真实 IP
+//  2. isIPTrusted —— 可信来源不自动封锁(#3)
+//
+// ⚠️ 这两处以前是两份各自维护的列表，结果 1107 换 IP 后只改了一份，
+// 另一份留着作废的 42.2.33.138，导致判断认错来源。现已合并，改这一处即可。
+// 这些来源是基础设施（背后可能承载大量真实用户），绝不应因某个用户的请求被整段封掉。
+var trustedSources = []struct{ cidr, note string }{
+	{"10.0.0.0/8", "内网"},
+	{"172.16.0.0/12", "Docker/内网"},
+	{"61.92.38.202/32", "1107（原 42.2.33.138 已作废）"},
+	{"47.239.137.202/32", "ALHK"},
+	{"8.159.153.184/32", "ALSH"},
+	{"81.69.185.252/32", "TXSH"},
+	{"161.153.89.153/32", "甲骨文1"},
+	{"141.147.179.9/32", "甲骨文2"},
+	{"158.101.89.59/32", "甲骨文3"},
+	{"129.146.250.212/32", "甲骨文4"},
+	{"161.118.230.77/32", "甲骨文5/SG1"},
+	{"168.138.161.90/32", "甲骨文6/SG2"},
+}
+
+// isIPTrusted 判断 IP 是否为可信来源（BTM 节点/内网代理），可信来源不自动封锁(#3)。
+func isIPTrusted(ip string) bool {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	for _, s := range trustedSources {
+		if _, cidr, err := net.ParseCIDR(s.cidr); err == nil && cidr.Contains(parsed) {
+			return true
+		}
+	}
+	return false
+}
+
+// StartExpiryWorker 定期清理过期的自动封锁（#4 TTL）：每 5 分钟删除 expires_at 已过期的 auto_added 条目并重载。
+// 手动条目（expires_at 为 NULL）永不过期。
+func StartExpiryWorker() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		res, err := db.DB.Exec(
+			`DELETE FROM filter_blacklist WHERE auto_added=1 AND expires_at IS NOT NULL AND expires_at < datetime('now','localtime')`)
+		if err != nil {
+			continue
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			log.Printf("[filter] TTL 到期自动解封 %d 个 IP", n)
+			ApplyFilter()
+		}
+	}
 }
 
 // parseLogFields 从 nginx 日志行中解析 method、path、ua

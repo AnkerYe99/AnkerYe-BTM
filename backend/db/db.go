@@ -308,10 +308,13 @@ var versionedMigrations = []struct {
 	{7, "add_hc_host", []string{
 		`ALTER TABLE rules ADD COLUMN hc_host TEXT DEFAULT ''`,
 	}},
-	// ⚠️ 版本号从 8 跳到 9：生产库里 v8 已被 add_blacklist_ttl 占用
-	// （2026-07-01 的 WAF 修复，给 filter_blacklist 加 expires_at，那次源码未提交到本仓库）。
-	// migrate() 按 "version <= current 就跳过" 推进，若这里仍写 8，
-	// 在已升过那一版的机器上本迁移会被静默跳过，字段加不上，服务起来后查 rules 直接报 no such column。
+	{8, "add_blacklist_ttl", []string{
+		// #4 自动封锁 TTL：到期自动解封，避免动态/共享 IP 被永久误伤（手动条目 expires_at 为 NULL 永不过期）
+		`ALTER TABLE filter_blacklist ADD COLUMN expires_at DATETIME DEFAULT NULL`,
+	}},
+	// v8 是 2026-07-01 WAF 修复带来的，生产库早已应用（源码此前未提交，现已补录）。
+	// 本条必须是 9：migrate() 按 "version <= current 就跳过" 推进，若写成 8，
+	// 在已升过那一版的机器上会被静默跳过，字段加不上，服务起来后查 rules 直接报 no such column。
 	{9, "add_rule_ip_acl", []string{
 		// 规则级 IP 访问控制：off=不限制 / allow=仅允许名单内 / deny=拒绝名单内
 		`ALTER TABLE rules ADD COLUMN ip_acl_mode TEXT DEFAULT 'off'`,

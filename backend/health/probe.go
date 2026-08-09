@@ -84,14 +84,19 @@ func probeHTTP(addr, proto, path, hcHost string, timeout time.Duration, start ti
 	resp, err := client.Do(req)
 	latency := int(time.Since(start).Milliseconds())
 	if err != nil {
+		// HTTP 层失败（对端在建连后关闭/EOF/重置，或按来源IP、Host 拒绝本次探测）——
+		// 退回 TCP 存活探测：端口能建立连接即证明后端进程在运行、仅拒绝了这次探测请求，不算宕机。
+		// 典型场景：共享后端对非白名单来源的真实 vhost 直接 close(444)，但对真实业务流量正常服务。
+		if c, e := net.DialTimeout("tcp", addr, timeout); e == nil {
+			c.Close()
+			return ProbeResult{OK: true, Latency: latency}
+		}
 		return ProbeResult{OK: false, Latency: latency, Err: err.Error()}
 	}
 	defer resp.Body.Close()
-	// 2xx / 3xx = 在线
-	// 403 = vhost 已配置但路径禁止访问，服务在运行，视为在线
-	// 404 = vhost 未配置或路径不存在，视为故障
-	// 5xx = 服务器错误，视为故障
-	if resp.StatusCode < 400 || resp.StatusCode == 403 {
+	// 任何 < 500 的 HTTP 应答都证明服务在运行（含 404：vhost 未配置/路径不存在属配置问题，非宕机）；
+	// 仅 5xx（服务器内部错误）判为故障。
+	if resp.StatusCode < 500 {
 		return ProbeResult{OK: true, Latency: latency}
 	}
 	return ProbeResult{OK: false, Latency: latency, Err: fmt.Sprintf("status=%d", resp.StatusCode)}
