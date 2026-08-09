@@ -30,3 +30,9 @@ deploy/*.tar.gz
 /ankerye-flow-server-amd64
 /ankerye-flow-server-arm64
 /ankerye-flow-server
+
+# backend 下历史遗留的二进制（曾被追踪，2026-08-09 untrack；名字不补进来的话 git add -A 会再次收进去）
+backend/ankerye-btm-amd64
+backend/ankerye-btm-arm64
+backend/btm-amd64
+backend/btm-arm64
