@@ -132,7 +132,13 @@ func buildFilterConf() (string, error) {
 	sb.WriteString("}\n\n")
 
 	// 被拦截时不写 capture log（$__nf_block=1 → 空字符串，access_log if= 不写入）
-	sb.WriteString("map $__nf_block $__nf_do_capture {\n    1  \"\";\n    default \"1\";\n}\n")
+	// $__nf_block 由各 http server 块内的 set 指令定义；无任何启用的 http 规则时
+	// 该变量不存在，nginx 会以 unknown "__nf_block" variable 拒绝启动 —— 故条件生成
+	var httpRuleCnt int
+	db.DB.QueryRow(`SELECT COUNT(*) FROM rules WHERE protocol='http' AND status=1`).Scan(&httpRuleCnt)
+	if httpRuleCnt > 0 {
+		sb.WriteString("map $__nf_block $__nf_do_capture {\n    1  \"\";\n    default \"1\";\n}\n")
+	}
 
 	return sb.String(), nil
 }
