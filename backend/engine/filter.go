@@ -218,9 +218,10 @@ func processAutoBlock(line string) {
 		return
 	}
 	reason := parseTriggerReason(line)
-	// #14: 只有命中具体 path/ua/method/cidr 规则才自动封锁。
+	// #14: 只有命中具体 ua/method/cidr 规则才自动封锁。
 	// "触发：ip"（该 IP 已在黑名单、这次 444 是本地拦截自身造成）与泛化"触发过滤规则"（无具体命中）
 	// 一律不再封——否则已封 IP 的每个被 444 的请求都会重复刷新封锁，形成永不过期的自反馈死循环。
+	// #15: "触发：path" 也不再封 IP，只拦当次请求（原因见 isSpecificRuleReason）。
 	if !isSpecificRuleReason(reason) {
 		return
 	}
@@ -266,11 +267,20 @@ func isIPWhitelisted(ip string) bool {
 	return false
 }
 
-// isSpecificRuleReason 判断触发原因是否命中了具体的 path/ua/method/cidr 规则。
+// isSpecificRuleReason 判断触发原因是否命中了具体的 ua/method/cidr 规则。
 // 仅这些才应触发自动封锁；"触发：ip"（已封 IP 自身被 444）与泛化"触发过滤规则"（无具体命中）不封，防自反馈循环(#14)。
+//
+// #15（2026-09-27）: "触发：path" 不再自动封锁。path 探测（.php/.env/phpmyadmin 等）
+// 依旧由 nginx 对当次请求返回 444，但不牵连源 IP。
+// 原因：路径探测的来源往往是共享出口/NAT/CGNAT，背后混着真实用户和我们自己的设备。
+// 当天一次 WordPress 后门路径扫描（/wp-content/plugins/hellopress/wp_filemanager.php）
+// 就把办公出口 14.199.248.145 连坐封了 6 小时，同出口的手机与监控探针全线不可用
+// （当天被拒 15159 次，表现为 502——因为边缘节点未封、内网节点封，上游只看到连接被掐断），
+// 且此前已用同一方式复发 7 次（9/12、9/15、9/16×2、9/17、9/19、9/27）。
+// ua（sqlmap/nmap/nuclei 等攻击工具标识）与 method（CONNECT/PROPFIND）保留封锁——
+// 这些特征不会出现在正常用户的请求里，误伤风险远低于 path。
 func isSpecificRuleReason(reason string) bool {
-	return strings.HasPrefix(reason, "触发：path") ||
-		strings.HasPrefix(reason, "触发：ua") ||
+	return strings.HasPrefix(reason, "触发：ua") ||
 		strings.HasPrefix(reason, "触发：method") ||
 		strings.HasPrefix(reason, "触发：cidr")
 }
