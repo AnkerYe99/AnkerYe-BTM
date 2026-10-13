@@ -12,9 +12,10 @@ import (
 // DB 用于同步读写（用户操作、规则 CRUD 等需要立即返回结果的场景）
 var DB *sql.DB
 
-// asyncCh 是异步写队列，健康检查/统计等高频写入投入此 channel，
+// asyncCh 是允许丢失单次更新的异步写队列，统计等高频写入投入此 channel，
 // 由单个 writer goroutine 串行消费，无论多少 worker 并发都不会阻塞调用方。
 // 缓冲 100000 足以应对数千 worker 的突发。
+// 健康检查状态、计数和跳变日志会影响 nginx 成员集，必须走同步事务，禁止放入此队列。
 var asyncCh = make(chan asyncOp, 100000)
 
 type asyncOp struct {
@@ -23,7 +24,7 @@ type asyncOp struct {
 }
 
 // AsyncExec 火且忘：写入 channel 立即返回，不阻塞调用方。
-// 适用于健康检查状态更新、统计累积等允许丢失单次的场景。
+// 只适用于统计累积等允许丢失单次的场景。
 func AsyncExec(query string, args ...interface{}) {
 	select {
 	case asyncCh <- asyncOp{query, args}:
@@ -51,8 +52,8 @@ func Init(path string) error {
 	if err != nil {
 		return err
 	}
-	// 读操作允许并发；写操作通过 AsyncExec channel 串行化，
-	// 不再依赖连接数来限制并发写，彻底解决高并发下的连接排队问题。
+	// 读操作允许并发；可丢失的统计写通过 AsyncExec channel 串行化，
+	// 状态机和用户操作等关键写入仍使用同步事务。
 	DB.SetMaxOpenConns(16)
 	DB.SetMaxIdleConns(16)
 	if err := DB.Ping(); err != nil {

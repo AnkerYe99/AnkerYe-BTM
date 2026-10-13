@@ -52,3 +52,11 @@ HTTPS 回源固定启用 SNI，并限制为 TLS 1.2/1.3。证书校验默认开�
 - [Controlling nginx](https://nginx.org/en/docs/control.html)：HUP/reload 时 master 先检查新配置并尝试打开新日志/监听套接字；失败则继续使用旧配置，成功后才启动新 worker 并优雅关闭旧 worker。
 - [Command-line parameters](https://nginx.org/en/docs/switches.html)：`-t` 不只检查语法，还会尝试打开配置中引用的文件；`-s reload` 启动使用新配置的 worker，并优雅关闭旧 worker。
 - [`worker_shutdown_timeout`](https://nginx.org/en/docs/ngx_core_module.html#worker_shutdown_timeout)：为 worker 的优雅关闭设置超时，到期后 nginx 尝试关闭尚未结束的当前连接。
+
+## 健康状态一致性
+
+健康检查的状态、连续成功/失败计数和跳变日志不再进入允许丢写的异步统计队列。同一规则的一轮探测使用一个同步数据库事务，事务提交成功后才按需调用一次 `ApplyRule`，因此恢复节点会在重新渲染前已经是 DB 中的 `up` 状态。
+
+状态更新使用旧 state、server ID、rule ID 和探测时的端点做 compare-and-swap。并发人工禁用、删除或修改端点会使整轮事务回滚，不会被健康 worker 覆盖。一轮内多个节点同时跳变仍只应用一次配置；没有状态跳变时只持久化计数和检查时间，不触发 nginx reload。
+
+若 `ApplyRule` 失败，其文件级回退完成后，健康检查会用本轮新状态和时间戳作为条件，在补偿事务中恢复更新前的数据库状态，并把失败写入跳变日志；成功生效前不会发送 up/down 通知。补偿事务自身失败会记录 `CRITICAL` 并触发强制运维邮件，避免 DB 与 nginx 的分歧被静默忽略。
