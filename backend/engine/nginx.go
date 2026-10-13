@@ -45,9 +45,23 @@ func ensureCatchAllCert() (string, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}
-	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	crtPEM, keyPEM, err := generateCatchAllCertPair()
 	if err != nil {
 		return "", err
+	}
+	if err := writeFileAtomic(crtPath, crtPEM, 0644); err != nil {
+		return "", err
+	}
+	if err := writeFileAtomic(keyPath, keyPEM, 0600); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func generateCatchAllCertPair() ([]byte, []byte, error) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, nil, err
 	}
 	tmpl := x509.Certificate{
 		SerialNumber:          big.NewInt(time.Now().UnixNano()),
@@ -61,17 +75,11 @@ func ensureCatchAllCert() (string, error) {
 	}
 	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &priv.PublicKey, priv)
 	if err != nil {
-		return "", err
+		return nil, nil, err
 	}
 	crtPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
-	if err := os.WriteFile(crtPath, crtPEM, 0644); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(keyPath, keyPEM, 0600); err != nil {
-		return "", err
-	}
-	return dir, nil
+	return crtPEM, keyPEM, nil
 }
 
 // formatBackend 给 upstream server 拼地址：IPv6 需要用中括号
@@ -496,16 +504,15 @@ func isNamedSN(sn string) bool {
 	return false
 }
 
-// SyncPortDefaults keeps catch-all default_server blocks up to date.
-// For every HTTP port that has named-domain rules but no wildcard rule,
-// it writes a default_server block returning 403 so unmatched Host headers are rejected.
-// HTTPS ports are skipped — TLS handshake failure is the natural reject.
-func SyncPortDefaults() error {
+// renderPortDefaultFiles returns the exact catch-all file set that
+// SyncPortDefaults writes. It has no filesystem side effects so ApplyAll can
+// include the same bytes in its all-or-nothing staging transaction.
+func renderPortDefaultFiles() (map[string]renderedFile, bool, error) {
 	rows, err := db.DB.Query(`SELECT listen_port, listen_stack, https_enabled, https_port, server_name,
 		IFNULL(upstream_protocol,'http')
 		FROM rules WHERE protocol='http' AND status=1`)
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 	defer rows.Close()
 	type portState struct {
@@ -526,7 +533,7 @@ func SyncPortDefaults() error {
 		var stack, sn, upstreamProtocol string
 		var httpsPort sql.NullInt64
 		if err := rows.Scan(&port, &stack, &httpsEnabled, &httpsPort, &sn, &upstreamProtocol); err != nil {
-			return err
+			return nil, false, err
 		}
 		if stack == "" {
 			stack = "both"
@@ -556,46 +563,35 @@ func SyncPortDefaults() error {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return nil, false, err
 	}
 
-	// catchCertDir 在存在 HTTPS 端口时按需生成自签证书
-	catchCertDir := ""
+	needsCatchAllCert := false
 	for _, ps := range ports {
 		if ps.isHTTPS {
-			d, err := ensureCatchAllCert()
-			if err != nil {
-				return fmt.Errorf("准备 HTTPS catch-all 证书失败: %w", err)
-			}
-			catchCertDir = d
+			needsCatchAllCert = true
 			break
 		}
 	}
+	catchCertDir := filepath.Join(config.Global.Nginx.CertDir, "_catchall")
+	result := map[string]renderedFile{}
 
 	// 注意：nginx.conf 只 include *-http.conf，因此 HTTPS 端口的 catch-all 也必须用 -http.conf 后缀才会被加载
 	for port, ps := range ports {
 		path := filepath.Join(config.Global.Nginx.ConfDir, fmt.Sprintf("default-%d-http.conf", port))
 		if ps.isHTTPS {
 			// HTTPS 端口：生成 ssl catch-all default_server，未匹配 SNI 的请求统一返回“网站不存在”
-			if catchCertDir != "" {
-				content := fmt.Sprintf("# Auto catch-all: reject unmatched SNI on https port %d\nserver {\n", port)
-				content += renderListen(ps.stack, port, "ssl default_server")
-				content += "    server_name _;\n"
-				content += fmt.Sprintf("    ssl_certificate     %s/fullchain.pem;\n", catchCertDir)
-				content += fmt.Sprintf("    ssl_certificate_key %s/privkey.pem;\n", catchCertDir)
-				content += "    ssl_protocols TLSv1.2 TLSv1.3;\n"
-				content += "    ssl_ciphers HIGH:!aNULL:!MD5;\n"
-				content += "    default_type text/html;\n"
-				content += "    return 404 \"" + catchAllBody + "\";\n"
-				content += "}\n"
-				if err := writeFileAtomic(path, []byte(content), 0644); err != nil {
-					return err
-				}
-			} else {
-				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-					return err
-				}
-			}
+			content := fmt.Sprintf("# Auto catch-all: reject unmatched SNI on https port %d\nserver {\n", port)
+			content += renderListen(ps.stack, port, "ssl default_server")
+			content += "    server_name _;\n"
+			content += fmt.Sprintf("    ssl_certificate     %s/fullchain.pem;\n", catchCertDir)
+			content += fmt.Sprintf("    ssl_certificate_key %s/privkey.pem;\n", catchCertDir)
+			content += "    ssl_protocols TLSv1.2 TLSv1.3;\n"
+			content += "    ssl_ciphers HIGH:!aNULL:!MD5;\n"
+			content += "    default_type text/html;\n"
+			content += "    return 404 \"" + catchAllBody + "\";\n"
+			content += "}\n"
+			result[path] = renderedFile{data: []byte(content), mode: 0644}
 		} else if ps.hasNamed && !ps.hasWildcard {
 			// HTTP 端口：仅有具名域名且无通配规则时，生成 catch-all default_server
 			content := fmt.Sprintf("# Auto catch-all: reject unmatched domains on port %d\nserver {\n", port)
@@ -604,29 +600,41 @@ func SyncPortDefaults() error {
 			content += "    default_type text/html;\n"
 			content += "    return 404 \"" + catchAllBody + "\";\n"
 			content += "}\n"
-			if err := writeFileAtomic(path, []byte(content), 0644); err != nil {
-				return err
-			}
-		} else {
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				return err
-			}
+			result[path] = renderedFile{data: []byte(content), mode: 0644}
+		}
+	}
+	return result, needsCatchAllCert, nil
+}
+
+// SyncPortDefaults keeps catch-all default_server blocks up to date.
+// For every managed port, it writes the same output returned by
+// renderPortDefaultFiles and removes every stale default-*-http.conf file.
+func SyncPortDefaults() error {
+	desired, needsCatchAllCert, err := renderPortDefaultFiles()
+	if err != nil {
+		return err
+	}
+	if needsCatchAllCert {
+		if _, err := ensureCatchAllCert(); err != nil {
+			return fmt.Errorf("准备 HTTPS catch-all 证书失败: %w", err)
+		}
+	}
+	for path, file := range desired {
+		if err := writeFileAtomic(path, file.data, file.mode); err != nil {
+			return err
 		}
 	}
 
-	// 清理已不存在端口的遗留文件
 	existing, err := filepath.Glob(filepath.Join(config.Global.Nginx.ConfDir, "default-*-http.conf"))
 	if err != nil {
 		return err
 	}
-	for _, f := range existing {
-		base := filepath.Base(f)
-		var p int
-		fmt.Sscanf(base, "default-%d-http.conf", &p)
-		if _, ok := ports[p]; !ok {
-			if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
-				return err
-			}
+	for _, path := range existing {
+		if _, ok := desired[path]; ok {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
 		}
 	}
 	return nil
@@ -868,9 +876,11 @@ func TestConfig() (string, error) {
 	return runNginxCmd("-t")
 }
 
+var nginxPIDPath = "/run/nginx.pid"
+
 // nginxRunning 检查 nginx 主进程是否存活
 func nginxRunning() bool {
-	data, err := os.ReadFile("/run/nginx.pid")
+	data, err := os.ReadFile(nginxPIDPath)
 	if err != nil {
 		return false
 	}
@@ -902,37 +912,6 @@ func smartReload() error {
 // reload 全部
 func Reload() error {
 	return smartReload()
-}
-
-// 应用所有启用的规则
-func ApplyAll() error {
-	// 清理 nginx 包安装时可能残留的默认 catch-all 配置，避免与 SyncPortDefaults 生成的冲突
-	for _, f := range []string{
-		"/etc/nginx/conf.d/default.conf",
-		"/etc/nginx/sites-enabled/default",
-	} {
-		if _, err := os.Stat(f); err == nil {
-			os.Remove(f)
-		}
-	}
-
-	rows, err := db.DB.Query(`SELECT id FROM rules WHERE status=1 ORDER BY id`)
-	if err != nil {
-		return err
-	}
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		rows.Scan(&id)
-		ids = append(ids, id)
-	}
-	rows.Close() // 必须在调用 ApplyRule 之前关闭，避免 SQLite 单连接死锁
-	for _, id := range ids {
-		if err := ApplyRule(id); err != nil {
-			return fmt.Errorf("rule %d: %w", id, err)
-		}
-	}
-	return nil
 }
 
 // 导出所有规则 nginx 配置（主从同步用）
