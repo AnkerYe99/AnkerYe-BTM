@@ -231,6 +231,46 @@ func TestApplyRuleRestoresConfigAndCAWhenNginxTestFails(t *testing.T) {
 	}
 }
 
+func TestSyncPortDefaultsKeepsLegacyPureHTTPSAndProtectsOptInPort(t *testing.T) {
+	oldConfig := config.Global
+	t.Cleanup(func() { config.Global = oldConfig })
+	root := t.TempDir()
+	config.Global.Nginx.ConfDir = filepath.Join(root, "conf")
+	config.Global.Nginx.CertDir = filepath.Join(root, "certs")
+	if err := os.MkdirAll(config.Global.Nginx.ConfDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Init(filepath.Join(root, "defaults.db")); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.DB.Close() })
+	if _, err := db.DB.Exec(`INSERT INTO rules(id,name,protocol,listen_port,listen_stack,
+		https_enabled,https_port,server_name,lb_method,upstream_protocol,status)
+		VALUES(77,'pure-https','http',0,'v4',1,10443,'api.example.invalid','round_robin','http',1)`); err != nil {
+		t.Fatal(err)
+	}
+	defaultPath := filepath.Join(config.Global.Nginx.ConfDir, "default-10443-http.conf")
+	if err := SyncPortDefaults(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(defaultPath); !os.IsNotExist(err) {
+		t.Fatalf("legacy pure HTTPS rule unexpectedly gained a catch-all: %v", err)
+	}
+	if _, err := db.DB.Exec(`UPDATE rules SET upstream_protocol='https' WHERE id=77`); err != nil {
+		t.Fatal(err)
+	}
+	if err := SyncPortDefaults(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(defaultPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "listen 0.0.0.0:10443 ssl default_server;") {
+		t.Fatalf("opt-in HTTPS upstream port lacks TLS catch-all:\n%s", got)
+	}
+}
+
 func TestProxySSLNameValidationAndDerivation(t *testing.T) {
 	got, err := ResolveProxySSLName("", "_ *.example.invalid API.Example.Invalid")
 	if err != nil || got != "api.example.invalid" {

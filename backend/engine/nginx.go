@@ -501,7 +501,8 @@ func isNamedSN(sn string) bool {
 // it writes a default_server block returning 403 so unmatched Host headers are rejected.
 // HTTPS ports are skipped — TLS handshake failure is the natural reject.
 func SyncPortDefaults() error {
-	rows, err := db.DB.Query(`SELECT listen_port, listen_stack, https_enabled, https_port, server_name
+	rows, err := db.DB.Query(`SELECT listen_port, listen_stack, https_enabled, https_port, server_name,
+		IFNULL(upstream_protocol,'http')
 		FROM rules WHERE protocol='http' AND status=1`)
 	if err != nil {
 		return err
@@ -522,16 +523,22 @@ func SyncPortDefaults() error {
 	}
 	for rows.Next() {
 		var port, httpsEnabled int
-		var stack, sn string
+		var stack, sn, upstreamProtocol string
 		var httpsPort sql.NullInt64
-		if err := rows.Scan(&port, &stack, &httpsEnabled, &httpsPort, &sn); err != nil {
+		if err := rows.Scan(&port, &stack, &httpsEnabled, &httpsPort, &sn, &upstreamProtocol); err != nil {
 			return err
 		}
 		if stack == "" {
 			stack = "both"
 		}
 		if port == 0 {
-			continue // 纯 HTTPS 模式，无 HTTP 端口，跳过
+			// 旧的纯 HTTPS 规则历史上不生成 catch-all，升级不能突然改变它们。
+			// 只为显式启用本次 HTTPS 回源能力的新规则补上专用 TLS 端口拒绝块。
+			if httpsEnabled == 1 && httpsPort.Valid && upstreamProtocol == "https" {
+				hp := int(httpsPort.Int64)
+				ports[hp] = &portState{stack: stack, isHTTPS: true}
+			}
+			continue
 		}
 		named := isNamedSN(sn)
 		ps := ensureHTTP(port, stack)
