@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -38,6 +39,59 @@ func TestMigrateAddsIPACL(t *testing.T) {
 	// 幂等：再跑一次迁移不应报错
 	if err := migrate(); err != nil {
 		t.Errorf("重复迁移失败: %v", err)
+	}
+}
+
+func TestMigrateV10HTTPSUpstreamDefaultsAndConstraints(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v10.db")
+	if err := Init(path); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	defer DB.Close()
+	if _, err := DB.Exec(`INSERT INTO rules(name,protocol,listen_port,lb_method) VALUES('legacy','http',80,'round_robin')`); err != nil {
+		t.Fatal(err)
+	}
+	var proto, name, ca string
+	var verify, depth, timeout int
+	if err := DB.QueryRow(`SELECT upstream_protocol,proxy_ssl_name,proxy_ssl_verify,
+		proxy_ssl_trusted_ca_pem,proxy_ssl_verify_depth,proxy_read_timeout FROM rules WHERE name='legacy'`).
+		Scan(&proto, &name, &verify, &ca, &depth, &timeout); err != nil {
+		t.Fatal(err)
+	}
+	if proto != "http" || name != "" || verify != 1 || ca != "" || depth != 5 || timeout != 60 {
+		t.Fatalf("v10 defaults wrong: %q %q %d %q %d %d", proto, name, verify, ca, depth, timeout)
+	}
+	for label, stmt := range map[string]string{
+		"protocol": `UPDATE rules SET upstream_protocol='ftp' WHERE name='legacy'`,
+		"verify":   `UPDATE rules SET proxy_ssl_verify=2 WHERE name='legacy'`,
+		"depth":    `UPDATE rules SET proxy_ssl_verify_depth=0 WHERE name='legacy'`,
+		"timeout":  `UPDATE rules SET proxy_read_timeout=0 WHERE name='legacy'`,
+	} {
+		if _, err := DB.Exec(stmt); err == nil {
+			t.Errorf("%s CHECK constraint did not reject invalid value", label)
+		}
+	}
+}
+
+func TestMigrateRejectsFutureSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "future.db")
+	if err := Init(path); err != nil {
+		t.Fatal(err)
+	}
+	DB.Close()
+	raw, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`INSERT INTO _schema_version(version,name,applied_at) VALUES(11,'future','now')`); err != nil {
+		t.Fatal(err)
+	}
+	raw.Close()
+	if err := Init(path); err == nil {
+		DB.Close()
+		t.Fatal("future schema was accepted")
+	} else if DB != nil {
+		DB.Close()
 	}
 }
 
@@ -91,7 +145,7 @@ func TestMigrateOnProdLikeDB(t *testing.T) {
 
 	var ver int
 	DB.QueryRow(`SELECT MAX(version) FROM _schema_version`).Scan(&ver)
-	if ver != 9 {
-		t.Errorf("迁移版本 = %d, want 9", ver)
+	if ver != 10 {
+		t.Errorf("迁移版本 = %d, want 10", ver)
 	}
 }

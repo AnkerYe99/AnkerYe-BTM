@@ -19,7 +19,10 @@ func TestRenderHTTP_IncludesIPACL(t *testing.T) {
 		ServerName: "a.example.com", LBMethod: "round_robin",
 		IPACLMode: "allow", IPACLList: "118.143.68.96/28\n161.153.89.153",
 	}
-	out := renderHTTP(r, []model.Server{{Address: "10.0.0.1", Port: 8080, Weight: 1}})
+	out, err := renderHTTP(r, []model.Server{{Address: "10.0.0.1", Port: 8080, Weight: 1}})
+	if err != nil {
+		t.Fatalf("renderHTTP: %v", err)
+	}
 
 	if strings.Count(out, "allow 118.143.68.96/28;") != 2 {
 		t.Errorf("HTTP 和 HTTPS 两个 server 块都应带上 ACL，实际:\n%s", out)
@@ -35,7 +38,7 @@ func TestRenderHTTP_IncludesIPACL(t *testing.T) {
 
 	// 关闭时不得残留任何 allow/deny
 	r.IPACLMode = "off"
-	if out := renderHTTP(r, []model.Server{{Address: "10.0.0.1", Port: 8080, Weight: 1}}); strings.Contains(out, "deny all;") {
+	if out, err := renderHTTP(r, []model.Server{{Address: "10.0.0.1", Port: 8080, Weight: 1}}); err != nil || strings.Contains(out, "deny all;") {
 		t.Errorf("关闭 ACL 后不应残留指令:\n%s", out)
 	}
 }

@@ -115,13 +115,15 @@ cd AnkerYe-BTM
 # 构建前端
 cd frontend
 npm install
-npm run build
+npm run build:embed
 cd ..
 
 # 构建后端（含嵌入前端静态文件）
 cd backend
 go build -o nginxflow-server .
 ```
+
+HTTPS 回源的字段、兼容策略和升级顺序见 [HTTPS_UPSTREAM.md](HTTPS_UPSTREAM.md)。
 
 ---
 

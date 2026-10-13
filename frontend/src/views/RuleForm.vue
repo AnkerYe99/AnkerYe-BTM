@@ -74,6 +74,41 @@
           </el-radio-group>
         </el-form-item>
 
+        <template v-if="isHTTP">
+          <el-divider>回源连接</el-divider>
+          <el-form-item label="回源协议" required>
+            <el-radio-group v-model="form.upstream_protocol">
+              <el-radio-button label="http">HTTP</el-radio-button>
+              <el-radio-button label="https">HTTPS</el-radio-button>
+            </el-radio-group>
+            <div style="color:#999;font-size:12px;margin-top:4px">这里只控制 BTM 到后端节点的连接，不改变客户端监听协议。</div>
+          </el-form-item>
+          <el-form-item label="读取超时(秒)" required>
+            <el-input-number v-model="form.proxy_read_timeout" :min="1" :max="86400" />
+            <span style="margin-left:12px;color:#999;font-size:12px">SSE 可按业务静默时间调大；默认 60 秒。</span>
+          </el-form-item>
+          <template v-if="form.upstream_protocol==='https'">
+            <el-form-item label="TLS SNI / 校验名">
+              <el-input v-model="form.proxy_ssl_name" placeholder="留空时取 server_name 中第一个精确域名" />
+            </el-form-item>
+            <el-form-item label="校验证书">
+              <el-switch v-model="form.proxy_ssl_verify" :active-value="1" :inactive-value="0" />
+              <span style="margin-left:12px;color:#999;font-size:12px">生产规则应保持开启。</span>
+            </el-form-item>
+            <el-alert v-if="form.proxy_ssl_verify===0" type="error" :closable="false" show-icon
+              title="证书校验已关闭：该配置不能防止伪造源站，仅用于受控测试。" style="margin-bottom:14px" />
+            <template v-if="form.proxy_ssl_verify===1">
+              <el-form-item label="自定义 CA PEM">
+                <el-input v-model="form.proxy_ssl_trusted_ca_pem" type="textarea" :rows="7"
+                  placeholder="留空使用系统 CA；私有源站粘贴一个或多个 CA CERTIFICATE PEM（不得粘贴私钥）" />
+              </el-form-item>
+              <el-form-item label="证书链深度">
+                <el-input-number v-model="form.proxy_ssl_verify_depth" :min="1" :max="10" />
+              </el-form-item>
+            </template>
+          </template>
+        </template>
+
         <el-divider>健康检查</el-divider>
         <el-form-item label="启用">
           <el-switch v-model="form.hc_enabled" :active-value="1" :inactive-value="0" />
@@ -182,7 +217,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 
 const route = useRoute()
@@ -215,6 +250,8 @@ const form = ref({
   hc_rise: 2, hc_fall: 3, log_max_size: '5M', capture_max_size: '5M', custom_config: '',
   capture_body: 0,
   ip_acl_mode: 'off', ip_acl_list: '',
+  upstream_protocol: 'http', proxy_ssl_name: '', proxy_ssl_verify: 1,
+  proxy_ssl_trusted_ca_pem: '', proxy_ssl_verify_depth: 5, proxy_read_timeout: 60,
   servers: [{ address: '', port: null, weight: 1, state: 'up' }]
 })
 
@@ -282,6 +319,9 @@ async function submit() {
     payload.https_enabled = 0; payload.https_port = null
     payload.ssl_cert_id = null; payload.ssl_redirect = 0
     if (payload.protocol !== 'http') payload.server_name = ''
+    payload.upstream_protocol = 'http'; payload.proxy_ssl_name = ''
+    payload.proxy_ssl_verify = 1; payload.proxy_ssl_trusted_ca_pem = ''
+    payload.proxy_ssl_verify_depth = 5; payload.proxy_read_timeout = 60
   }
   if (payload.https_enabled !== 1) {
     payload.https_port = null; payload.ssl_cert_id = null; payload.ssl_redirect = 0
@@ -307,6 +347,24 @@ async function submit() {
     const bad = items.filter(s => !isIPOrCIDR(s))
     if (bad.length > 0) return ElMessage.warning('IP 名单格式错误：' + bad.join('、'))
     payload.ip_acl_list = items.join('\n')
+  }
+
+  if (payload.protocol === 'http') {
+    if (!payload.proxy_read_timeout || payload.proxy_read_timeout < 1 || payload.proxy_read_timeout > 86400) {
+      return ElMessage.warning('回源读取超时必须在 1-86400 秒之间')
+    }
+    if (payload.upstream_protocol !== 'https') {
+      payload.upstream_protocol = 'http'; payload.proxy_ssl_name = ''
+      payload.proxy_ssl_verify = 1; payload.proxy_ssl_trusted_ca_pem = ''
+      payload.proxy_ssl_verify_depth = 5
+    } else if (payload.proxy_ssl_verify === 0) {
+      try {
+        await ElMessageBox.confirm('关闭回源证书校验会失去源站身份验证。确认仅在受控测试中使用？', '危险配置', {
+          type: 'error', confirmButtonText: '确认关闭校验', cancelButtonText: '返回修改'
+        })
+      } catch { return }
+      payload.proxy_ssl_trusted_ca_pem = ''; payload.proxy_ssl_verify_depth = 5
+    }
   }
 
   saving.value = true

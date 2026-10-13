@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -146,16 +147,22 @@ func Backup(c *gin.Context) {
 		IFNULL(server_name,''),lb_method,ssl_cert_id,ssl_redirect,hc_enabled,hc_interval,hc_timeout,
 		IFNULL(hc_path,''),IFNULL(hc_host,''),IFNULL(hc_rise,0),IFNULL(hc_fall,0),
 		IFNULL(log_max_size,''),IFNULL(capture_max_size,'5M'),IFNULL(custom_config,''),
-		IFNULL(capture_body,0),IFNULL(ip_acl_mode,'off'),IFNULL(ip_acl_list,''),status FROM rules ORDER BY id`); err == nil {
+		IFNULL(capture_body,0),IFNULL(ip_acl_mode,'off'),IFNULL(ip_acl_list,''),
+		IFNULL(upstream_protocol,'http'),IFNULL(proxy_ssl_name,''),IFNULL(proxy_ssl_verify,1),
+		IFNULL(proxy_ssl_trusted_ca_pem,''),IFNULL(proxy_ssl_verify_depth,5),
+		IFNULL(proxy_read_timeout,60),status FROM rules ORDER BY id`); err == nil {
 		for rows.Next() {
 			var id int64
 			var name, proto, stack, srvName, lbm, hcPath, hcHost, logSize, captureMaxSize, custom string
 			var aclMode, aclList string
+			var upstreamProtocol, proxySSLName, proxySSLTrustedCAPEM string
 			var port, httpsEn, httpsPort, sslRed, hcEn, hcInt, hcTo, hcRise, hcFall, captureBody, status int
+			var proxySSLVerify, proxySSLVerifyDepth, proxyReadTimeout int
 			var sslCert interface{}
 			rows.Scan(&id, &name, &proto, &port, &stack, &httpsEn, &httpsPort, &srvName, &lbm, &sslCert,
 				&sslRed, &hcEn, &hcInt, &hcTo, &hcPath, &hcHost, &hcRise, &hcFall, &logSize, &captureMaxSize,
-				&custom, &captureBody, &aclMode, &aclList, &status)
+				&custom, &captureBody, &aclMode, &aclList, &upstreamProtocol, &proxySSLName,
+				&proxySSLVerify, &proxySSLTrustedCAPEM, &proxySSLVerifyDepth, &proxyReadTimeout, &status)
 			data.Rules = append(data.Rules, map[string]interface{}{
 				"id": id, "name": name, "protocol": proto, "listen_port": port,
 				"listen_stack": stack, "https_enabled": httpsEn, "https_port": httpsPort,
@@ -165,6 +172,11 @@ func Backup(c *gin.Context) {
 				"log_max_size": logSize, "capture_max_size": captureMaxSize,
 				"custom_config": custom, "capture_body": captureBody,
 				"ip_acl_mode": aclMode, "ip_acl_list": aclList, "status": status,
+				"upstream_protocol": upstreamProtocol, "proxy_ssl_name": proxySSLName,
+				"proxy_ssl_verify":         proxySSLVerify,
+				"proxy_ssl_trusted_ca_pem": proxySSLTrustedCAPEM,
+				"proxy_ssl_verify_depth":   proxySSLVerifyDepth,
+				"proxy_read_timeout":       proxyReadTimeout,
 			})
 		}
 		rows.Close()
@@ -252,6 +264,65 @@ func TestEmail(c *gin.Context) {
 	util.OK(c, nil)
 }
 
+func restoreUpstreamValues(m map[string]interface{}) (string, string, int64, string, int64, int64, error) {
+	protocol, _ := m["protocol"].(string)
+	upstreamProtocol, _ := m["upstream_protocol"].(string)
+	if upstreamProtocol == "" {
+		upstreamProtocol = engine.DefaultUpstreamProtocol
+	}
+	verify := int64(1)
+	if _, ok := m["proxy_ssl_verify"]; ok {
+		verify = int64v(m["proxy_ssl_verify"])
+	}
+	depth := int64(5)
+	if _, ok := m["proxy_ssl_verify_depth"]; ok {
+		depth = int64v(m["proxy_ssl_verify_depth"])
+	}
+	readTimeout := int64(60)
+	if _, ok := m["proxy_read_timeout"]; ok {
+		readTimeout = int64v(m["proxy_read_timeout"])
+	}
+	name, _ := m["proxy_ssl_name"].(string)
+	ca, _ := m["proxy_ssl_trusted_ca_pem"].(string)
+	if protocol != "http" {
+		return "http", "", 1, "", 5, 60, nil
+	}
+	if readTimeout < 1 || readTimeout > 86400 {
+		return "", "", 0, "", 0, 0, fmt.Errorf("proxy_read_timeout 超出范围")
+	}
+	if upstreamProtocol == "http" {
+		return "http", "", 1, "", 5, readTimeout, nil
+	}
+	if upstreamProtocol != "https" {
+		return "", "", 0, "", 0, 0, fmt.Errorf("upstream_protocol 无效")
+	}
+	if verify != 0 && verify != 1 {
+		return "", "", 0, "", 0, 0, fmt.Errorf("proxy_ssl_verify 无效")
+	}
+	if strings.TrimSpace(name) != "" {
+		var err error
+		name, err = engine.NormalizeProxySSLName(name)
+		if err != nil {
+			return "", "", 0, "", 0, 0, err
+		}
+	}
+	serverName, _ := m["server_name"].(string)
+	if _, err := engine.ResolveProxySSLName(name, serverName); err != nil {
+		return "", "", 0, "", 0, 0, err
+	}
+	if verify == 0 {
+		return "https", name, 0, "", 5, readTimeout, nil
+	}
+	if depth < 1 || depth > 10 {
+		return "", "", 0, "", 0, 0, fmt.Errorf("proxy_ssl_verify_depth 超出范围")
+	}
+	normalizedCA, err := engine.NormalizeTrustedCAPEM(ca)
+	if err != nil {
+		return "", "", 0, "", 0, 0, err
+	}
+	return "https", name, 1, normalizedCA, depth, readTimeout, nil
+}
+
 func Restore(c *gin.Context) {
 	file, _, err := c.Request.FormFile("file")
 	if err != nil {
@@ -281,10 +352,17 @@ func Restore(c *gin.Context) {
 		return
 	}
 	defer tx.Rollback()
+	execRestore := func(query string, args ...interface{}) error {
+		_, err := tx.Exec(query, args...)
+		return err
+	}
 
 	// 清空旧数据
 	for _, tbl := range []string{"upstream_servers", "rules", "ssl_certs", "system_settings", "filter_blacklist", "filter_whitelist"} {
-		tx.Exec("DELETE FROM " + tbl)
+		if err := execRestore("DELETE FROM " + tbl); err != nil {
+			util.Fail(c, 500, "恢复失败: "+err.Error())
+			return
+		}
 	}
 
 	// 恢复规则
@@ -297,44 +375,71 @@ func Restore(c *gin.Context) {
 		if aclMode != "allow" && aclMode != "deny" {
 			aclMode = "off"
 		}
-		tx.Exec(`INSERT OR IGNORE INTO rules(id,name,protocol,listen_port,listen_stack,https_enabled,https_port,
+		upstreamProtocol, proxySSLName, proxySSLVerify, proxySSLTrustedCAPEM,
+			proxySSLVerifyDepth, proxyReadTimeout, err := restoreUpstreamValues(m)
+		if err != nil {
+			util.Fail(c, 400, "备份中的 HTTPS 回源字段无效: "+err.Error())
+			return
+		}
+		if err := execRestore(`INSERT OR IGNORE INTO rules(id,name,protocol,listen_port,listen_stack,https_enabled,https_port,
 			server_name,lb_method,ssl_cert_id,ssl_redirect,hc_enabled,hc_interval,hc_timeout,hc_path,hc_host,
-			hc_rise,hc_fall,log_max_size,capture_max_size,custom_config,capture_body,ip_acl_mode,ip_acl_list,status)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			hc_rise,hc_fall,log_max_size,capture_max_size,custom_config,capture_body,ip_acl_mode,ip_acl_list,
+			upstream_protocol,proxy_ssl_name,proxy_ssl_verify,proxy_ssl_trusted_ca_pem,
+			proxy_ssl_verify_depth,proxy_read_timeout,status)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			int64v(m["id"]), m["name"], m["protocol"], int64v(m["listen_port"]),
 			m["listen_stack"], int64v(m["https_enabled"]), int64v(m["https_port"]),
 			m["server_name"], m["lb_method"], m["ssl_cert_id"], int64v(m["ssl_redirect"]),
 			int64v(m["hc_enabled"]), int64v(m["hc_interval"]), int64v(m["hc_timeout"]),
 			m["hc_path"], m["hc_host"], int64v(m["hc_rise"]), int64v(m["hc_fall"]),
 			m["log_max_size"], captureMaxSize, m["custom_config"], int64v(m["capture_body"]),
-			aclMode, m["ip_acl_list"],
-			int64v(m["status"]))
+			aclMode, m["ip_acl_list"], upstreamProtocol, proxySSLName, proxySSLVerify,
+			proxySSLTrustedCAPEM, proxySSLVerifyDepth, proxyReadTimeout,
+			int64v(m["status"])); err != nil {
+			util.Fail(c, 400, "备份中的规则无法恢复: "+err.Error())
+			return
+		}
 	}
 	// 恢复节点
 	for _, m := range data.Servers {
-		tx.Exec(`INSERT OR IGNORE INTO upstream_servers(id,rule_id,address,port,weight,state) VALUES(?,?,?,?,?,?)`,
-			int64v(m["id"]), int64v(m["rule_id"]), m["address"], int64v(m["port"]), int64v(m["weight"]), m["state"])
+		if err := execRestore(`INSERT OR IGNORE INTO upstream_servers(id,rule_id,address,port,weight,state) VALUES(?,?,?,?,?,?)`,
+			int64v(m["id"]), int64v(m["rule_id"]), m["address"], int64v(m["port"]), int64v(m["weight"]), m["state"]); err != nil {
+			util.Fail(c, 400, "备份中的后端节点无法恢复: "+err.Error())
+			return
+		}
 	}
 	// 恢复证书
 	for _, m := range data.Certs {
-		tx.Exec(`INSERT OR IGNORE INTO ssl_certs(id,domain,cert_pem,key_pem,expire_at,auto_renew) VALUES(?,?,?,?,?,?)`,
-			int64v(m["id"]), m["domain"], m["cert_pem"], m["key_pem"], m["expire_at"], int64v(m["auto_renew"]))
+		if err := execRestore(`INSERT OR IGNORE INTO ssl_certs(id,domain,cert_pem,key_pem,expire_at,auto_renew) VALUES(?,?,?,?,?,?)`,
+			int64v(m["id"]), m["domain"], m["cert_pem"], m["key_pem"], m["expire_at"], int64v(m["auto_renew"])); err != nil {
+			util.Fail(c, 400, "备份中的证书无法恢复: "+err.Error())
+			return
+		}
 	}
 	// 恢复设置
 	for k, v := range data.Settings {
-		tx.Exec(`INSERT OR REPLACE INTO system_settings(k,v) VALUES(?,?)`, k, v)
+		if err := execRestore(`INSERT OR REPLACE INTO system_settings(k,v) VALUES(?,?)`, k, v); err != nil {
+			util.Fail(c, 400, "备份中的设置无法恢复: "+err.Error())
+			return
+		}
 	}
 
 	// 恢复黑名单
 	for _, m := range data.FilterBlacklist {
-		tx.Exec(`INSERT OR IGNORE INTO filter_blacklist(id,type,value,note,hits,auto_added,enabled) VALUES(?,?,?,?,?,?,?)`,
+		if err := execRestore(`INSERT OR IGNORE INTO filter_blacklist(id,type,value,note,hits,auto_added,enabled) VALUES(?,?,?,?,?,?,?)`,
 			int64v(m["id"]), m["type"], m["value"], m["note"],
-			int64v(m["hits"]), int64v(m["auto_added"]), int64v(m["enabled"]))
+			int64v(m["hits"]), int64v(m["auto_added"]), int64v(m["enabled"])); err != nil {
+			util.Fail(c, 400, "备份中的黑名单无法恢复: "+err.Error())
+			return
+		}
 	}
 	// 恢复白名单
 	for _, m := range data.FilterWhitelist {
-		tx.Exec(`INSERT OR IGNORE INTO filter_whitelist(id,type,value,note,enabled) VALUES(?,?,?,?,?)`,
-			int64v(m["id"]), m["type"], m["value"], m["note"], int64v(m["enabled"]))
+		if err := execRestore(`INSERT OR IGNORE INTO filter_whitelist(id,type,value,note,enabled) VALUES(?,?,?,?,?)`,
+			int64v(m["id"]), m["type"], m["value"], m["note"], int64v(m["enabled"])); err != nil {
+			util.Fail(c, 400, "备份中的白名单无法恢复: "+err.Error())
+			return
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

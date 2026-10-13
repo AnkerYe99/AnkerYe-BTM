@@ -18,31 +18,37 @@ import (
 // RuleFP 是参与指纹计算的规则字段集合。
 // 注意用 SslCertDomain 而非 ssl_cert_id——主从的证书自增 id 不一定相同，域名才是稳定标识。
 type RuleFP struct {
-	ID             int64
-	Name           string
-	Protocol       string
-	ListenPort     int64
-	ListenStack    string
-	HTTPSEnabled   int64
-	HTTPSPort      int64
-	ServerName     string
-	LBMethod       string
-	SSLCertDomain  string
-	SSLRedirect    int64
-	HCEnabled      int64
-	HCInterval     int64
-	HCTimeout      int64
-	HCPath         string
-	HCHost         string
-	HCFall         int64
-	HCRise         int64
-	LogMaxSize     string
-	CaptureMaxSize string
-	CustomConfig   string
-	CaptureBody    int64
-	IPACLMode      string
-	IPACLList      string
-	Status         int64
+	ID                   int64
+	Name                 string
+	Protocol             string
+	ListenPort           int64
+	ListenStack          string
+	HTTPSEnabled         int64
+	HTTPSPort            int64
+	ServerName           string
+	LBMethod             string
+	SSLCertDomain        string
+	SSLRedirect          int64
+	HCEnabled            int64
+	HCInterval           int64
+	HCTimeout            int64
+	HCPath               string
+	HCHost               string
+	HCFall               int64
+	HCRise               int64
+	LogMaxSize           string
+	CaptureMaxSize       string
+	CustomConfig         string
+	CaptureBody          int64
+	IPACLMode            string
+	IPACLList            string
+	UpstreamProtocol     string
+	ProxySSLName         string
+	ProxySSLVerify       int64
+	ProxySSLTrustedCAPEM string
+	ProxySSLVerifyDepth  int64
+	ProxyReadTimeout     int64
+	Status               int64
 }
 
 // ServerFP 是参与指纹计算的上游节点字段集合。
@@ -61,6 +67,29 @@ func WriteRuleFP(w io.Writer, r RuleFP) {
 		r.SSLCertDomain, r.SSLRedirect, r.HCEnabled, r.HCInterval, r.HCTimeout,
 		r.HCPath, r.HCHost, r.HCFall, r.HCRise, r.LogMaxSize, r.CaptureMaxSize,
 		r.CustomConfig, r.CaptureBody, r.IPACLMode, r.IPACLList, r.Status)
+
+	upstreamProtocol := r.UpstreamProtocol
+	if upstreamProtocol == "" {
+		upstreamProtocol = DefaultUpstreamProtocol
+	}
+	verify := r.ProxySSLVerify
+	if verify != 0 && verify != 1 {
+		verify = DefaultProxySSLVerify
+	}
+	depth := r.ProxySSLVerifyDepth
+	if depth == 0 {
+		depth = DefaultProxySSLVerifyDepth
+	}
+	readTimeout := r.ProxyReadTimeout
+	if readTimeout == 0 {
+		readTimeout = DefaultProxyReadTimeout
+	}
+	if upstreamProtocol != DefaultUpstreamProtocol || r.ProxySSLName != "" ||
+		verify != DefaultProxySSLVerify || r.ProxySSLTrustedCAPEM != "" ||
+		depth != DefaultProxySSLVerifyDepth || readTimeout != DefaultProxyReadTimeout {
+		fmt.Fprintf(w, "U1:%d|%q|%q|%d|%q|%d|%d\n", r.ID, upstreamProtocol,
+			r.ProxySSLName, verify, TrustedCAPEMSHA256(r.ProxySSLTrustedCAPEM), depth, readTimeout)
+	}
 }
 
 // WriteServerFP 写入一个上游节点的指纹行，紧跟其所属规则行之后，按 address ASC, port ASC 排序。

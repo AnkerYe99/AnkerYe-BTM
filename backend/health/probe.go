@@ -2,12 +2,14 @@ package health
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
+	"ankerye-flow/engine"
 	"ankerye-flow/model"
 )
 
@@ -38,8 +40,46 @@ func Probe(s *model.Server, r *model.Rule) ProbeResult {
 				}
 			}
 		}
-		// SSL 卸载模式下后端是 HTTP，所以始终用 HTTP 探测
-		return probeHTTP(addr, "http", r.HCPath, hcHost, timeout, start)
+		scheme := r.UpstreamProtocol
+		if scheme == "" {
+			scheme = engine.DefaultUpstreamProtocol
+		}
+		var tlsConfig *tls.Config
+		if scheme == "https" {
+			sslName, err := engine.ResolveProxySSLName(r.ProxySSLName, r.ServerName)
+			if err != nil {
+				return ProbeResult{OK: false, Latency: int(time.Since(start).Milliseconds()), Err: "TLS SNI 配置无效"}
+			}
+			tlsConfig = &tls.Config{
+				ServerName:         sslName,
+				MinVersion:         tls.VersionTLS12,
+				MaxVersion:         tls.VersionTLS13,
+				InsecureSkipVerify: r.ProxySSLVerify == 0,
+			}
+			if r.ProxySSLVerify != 0 && r.ProxySSLTrustedCAPEM != "" {
+				pool := x509.NewCertPool()
+				if !pool.AppendCertsFromPEM([]byte(r.ProxySSLTrustedCAPEM)) {
+					return ProbeResult{OK: false, Latency: int(time.Since(start).Milliseconds()), Err: "回源 CA 无效"}
+				}
+				tlsConfig.RootCAs = pool
+			}
+			if r.ProxySSLVerify != 0 && r.ProxySSLVerifyDepth > 0 {
+				maxDepth := r.ProxySSLVerifyDepth
+				tlsConfig.VerifyConnection = func(state tls.ConnectionState) error {
+					for _, chain := range state.VerifiedChains {
+						intermediates := len(chain) - 2 // 不计叶子证书和信任根
+						if intermediates < 0 {
+							intermediates = 0
+						}
+						if intermediates <= maxDepth {
+							return nil
+						}
+					}
+					return fmt.Errorf("回源证书链深度超过 %d", maxDepth)
+				}
+			}
+		}
+		return probeHTTP(addr, scheme, r.HCPath, hcHost, timeout, start, tlsConfig, scheme == "http")
 	case "tcp":
 		return probeTCP(addr, timeout, start)
 	case "udp":
@@ -54,7 +94,7 @@ func Probe(s *model.Server, r *model.Rule) ProbeResult {
 	return ProbeResult{OK: false, Err: "unknown protocol"}
 }
 
-func probeHTTP(addr, proto, path, hcHost string, timeout time.Duration, start time.Time) ProbeResult {
+func probeHTTP(addr, proto, path, hcHost string, timeout time.Duration, start time.Time, tlsConfig *tls.Config, allowTCPFallback bool) ProbeResult {
 	if path == "" {
 		path = "/"
 	}
@@ -70,8 +110,8 @@ func probeHTTP(addr, proto, path, hcHost string, timeout time.Duration, start ti
 			return http.ErrUseLastResponse // 不跟随重定向，3xx 直接算健康
 		},
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			DialContext: (&net.Dialer{Timeout: timeout}).DialContext,
+			TLSClientConfig: tlsConfig,
+			DialContext:     (&net.Dialer{Timeout: timeout}).DialContext,
 		},
 	}
 	req, err := http.NewRequest("GET", rawURL, nil)
@@ -87,9 +127,11 @@ func probeHTTP(addr, proto, path, hcHost string, timeout time.Duration, start ti
 		// HTTP 层失败（对端在建连后关闭/EOF/重置，或按来源IP、Host 拒绝本次探测）——
 		// 退回 TCP 存活探测：端口能建立连接即证明后端进程在运行、仅拒绝了这次探测请求，不算宕机。
 		// 典型场景：共享后端对非白名单来源的真实 vhost 直接 close(444)，但对真实业务流量正常服务。
-		if c, e := net.DialTimeout("tcp", addr, timeout); e == nil {
-			c.Close()
-			return ProbeResult{OK: true, Latency: latency}
+		if allowTCPFallback {
+			if c, e := net.DialTimeout("tcp", addr, timeout); e == nil {
+				c.Close()
+				return ProbeResult{OK: true, Latency: latency}
+			}
 		}
 		return ProbeResult{OK: false, Latency: latency, Err: err.Error()}
 	}

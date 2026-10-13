@@ -11,34 +11,41 @@ import (
 	"ankerye-flow/db"
 	"ankerye-flow/engine"
 	"ankerye-flow/health"
+	"ankerye-flow/model"
 	"ankerye-flow/util"
 )
 
 type ruleReq struct {
-	Name         string       `json:"name" binding:"required"`
-	Protocol     string       `json:"protocol" binding:"required"` // http / tcp / udp
-	ListenPort   int          `json:"listen_port"` // HTTP port for http; proxy port for tcp/udp; 0 = HTTPS-only
-	ListenStack  string       `json:"listen_stack"`
-	HTTPSEnabled int          `json:"https_enabled"`
-	HTTPSPort    *int         `json:"https_port"`
-	ServerName   string       `json:"server_name"`
-	LBMethod     string       `json:"lb_method"`
-	SSLCertID    *int64       `json:"ssl_cert_id"`
-	SSLRedirect  int          `json:"ssl_redirect"`
-	HCEnabled    int          `json:"hc_enabled"`
-	HCInterval   int          `json:"hc_interval"`
-	HCTimeout    int          `json:"hc_timeout"`
-	HCPath       string       `json:"hc_path"`
-	HCHost       string       `json:"hc_host"`
-	HCRise       int          `json:"hc_rise"`
-	HCFall       int          `json:"hc_fall"`
-	LogMaxSize     string       `json:"log_max_size"`
-	CaptureMaxSize string       `json:"capture_max_size"`
-	CustomConfig   string       `json:"custom_config"`
-	CaptureBody    int          `json:"capture_body"`
-	IPACLMode      string       `json:"ip_acl_mode"` // off / allow / deny
-	IPACLList      string       `json:"ip_acl_list"` // IP/CIDR 名单，一行一条
-	Servers      []serverItem `json:"servers"`
+	Name                 string       `json:"name" binding:"required"`
+	Protocol             string       `json:"protocol" binding:"required"` // http / tcp / udp
+	ListenPort           int          `json:"listen_port"`                 // HTTP port for http; proxy port for tcp/udp; 0 = HTTPS-only
+	ListenStack          string       `json:"listen_stack"`
+	HTTPSEnabled         int          `json:"https_enabled"`
+	HTTPSPort            *int         `json:"https_port"`
+	ServerName           string       `json:"server_name"`
+	LBMethod             string       `json:"lb_method"`
+	SSLCertID            *int64       `json:"ssl_cert_id"`
+	SSLRedirect          int          `json:"ssl_redirect"`
+	HCEnabled            int          `json:"hc_enabled"`
+	HCInterval           int          `json:"hc_interval"`
+	HCTimeout            int          `json:"hc_timeout"`
+	HCPath               string       `json:"hc_path"`
+	HCHost               string       `json:"hc_host"`
+	HCRise               int          `json:"hc_rise"`
+	HCFall               int          `json:"hc_fall"`
+	LogMaxSize           string       `json:"log_max_size"`
+	CaptureMaxSize       string       `json:"capture_max_size"`
+	CustomConfig         string       `json:"custom_config"`
+	CaptureBody          int          `json:"capture_body"`
+	IPACLMode            string       `json:"ip_acl_mode"` // off / allow / deny
+	IPACLList            string       `json:"ip_acl_list"` // IP/CIDR 名单，一行一条
+	UpstreamProtocol     string       `json:"upstream_protocol"`
+	ProxySSLName         string       `json:"proxy_ssl_name"`
+	ProxySSLVerify       *int         `json:"proxy_ssl_verify"`
+	ProxySSLTrustedCAPEM string       `json:"proxy_ssl_trusted_ca_pem"`
+	ProxySSLVerifyDepth  *int         `json:"proxy_ssl_verify_depth"`
+	ProxyReadTimeout     *int         `json:"proxy_read_timeout"`
+	Servers              []serverItem `json:"servers"`
 }
 
 type serverItem struct {
@@ -53,7 +60,8 @@ func ListRules(c *gin.Context) {
 	statusFilter := c.Query("status")
 	q := `SELECT id,name,protocol,listen_port,IFNULL(listen_stack,'both'),
 		https_enabled,https_port,server_name,lb_method,
-		ssl_cert_id,hc_enabled,log_max_size,status,created_at,updated_at FROM rules WHERE 1=1`
+		ssl_cert_id,hc_enabled,log_max_size,IFNULL(upstream_protocol,'http'),
+		IFNULL(proxy_read_timeout,60),status,created_at,updated_at FROM rules WHERE 1=1`
 	args := []interface{}{}
 	if protocolFilter != "" {
 		q += ` AND protocol=?`
@@ -70,20 +78,22 @@ func ListRules(c *gin.Context) {
 		return
 	}
 	type rowT struct {
-		id                               int64
-		name, proto, stack, srvName, lbm string
-		logSize, createdAt, updated      string
-		port, hcEnabled, status          int
-		httpsEnabled                     int
-		httpsPort                        sql.NullInt64
-		sslCertID                        sql.NullInt64
+		id                                            int64
+		name, proto, stack, srvName, lbm              string
+		logSize, upstreamProtocol, createdAt, updated string
+		port, hcEnabled, status                       int
+		proxyReadTimeout                              int
+		httpsEnabled                                  int
+		httpsPort                                     sql.NullInt64
+		sslCertID                                     sql.NullInt64
 	}
 	items := []rowT{}
 	for rows.Next() {
 		var r rowT
 		rows.Scan(&r.id, &r.name, &r.proto, &r.port, &r.stack,
 			&r.httpsEnabled, &r.httpsPort, &r.srvName, &r.lbm,
-			&r.sslCertID, &r.hcEnabled, &r.logSize, &r.status, &r.createdAt, &r.updated)
+			&r.sslCertID, &r.hcEnabled, &r.logSize, &r.upstreamProtocol,
+			&r.proxyReadTimeout, &r.status, &r.createdAt, &r.updated)
 		items = append(items, r)
 	}
 	rows.Close()
@@ -99,8 +109,9 @@ func ListRules(c *gin.Context) {
 			"https_enabled": r.httpsEnabled,
 			"https_port":    nullableInt64(r.httpsPort),
 			"server_name":   r.srvName, "lb_method": r.lbm,
-			"ssl_cert_id":  nullableInt64(r.sslCertID),
-			"hc_enabled":   r.hcEnabled, "log_max_size": r.logSize, "status": r.status,
+			"ssl_cert_id": nullableInt64(r.sslCertID),
+			"hc_enabled":  r.hcEnabled, "log_max_size": r.logSize, "status": r.status,
+			"upstream_protocol": r.upstreamProtocol, "proxy_read_timeout": r.proxyReadTimeout,
 			"server_count": srvCount.Int64, "up_count": upCount.Int64,
 			"created_at": r.createdAt, "updated_at": r.updated,
 			"addresses": addrs,
@@ -126,6 +137,10 @@ func CreateRule(c *gin.Context) {
 		util.Fail(c, 400, "参数错误: "+err.Error())
 		return
 	}
+	if err := normalizeUpstreamReq(&req); err != nil {
+		util.Fail(c, 400, err.Error())
+		return
+	}
 	if err := validateRule(&req); err != nil {
 		util.Fail(c, 400, err.Error())
 		return
@@ -137,7 +152,11 @@ func CreateRule(c *gin.Context) {
 
 	fillDefaults(&req)
 
-	tx, _ := db.DB.Begin()
+	tx, err := db.DB.Begin()
+	if err != nil {
+		util.Fail(c, 500, err.Error())
+		return
+	}
 	var sslCertID interface{}
 	if req.SSLCertID != nil {
 		sslCertID = *req.SSLCertID
@@ -150,12 +169,15 @@ func CreateRule(c *gin.Context) {
 		https_enabled,https_port,server_name,lb_method,
 		ssl_cert_id,ssl_redirect,hc_enabled,hc_interval,hc_timeout,hc_path,hc_host,hc_rise,hc_fall,
 		log_max_size,capture_max_size,custom_config,capture_body,
-		ip_acl_mode,ip_acl_list) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		ip_acl_mode,ip_acl_list,upstream_protocol,proxy_ssl_name,proxy_ssl_verify,
+		proxy_ssl_trusted_ca_pem,proxy_ssl_verify_depth,proxy_read_timeout)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		req.Name, req.Protocol, req.ListenPort, req.ListenStack,
 		req.HTTPSEnabled, httpsPort, req.ServerName, req.LBMethod,
 		sslCertID, req.SSLRedirect, req.HCEnabled, req.HCInterval, req.HCTimeout,
 		req.HCPath, req.HCHost, req.HCRise, req.HCFall, req.LogMaxSize, req.CaptureMaxSize, req.CustomConfig, req.CaptureBody,
-		req.IPACLMode, req.IPACLList)
+		req.IPACLMode, req.IPACLList, req.UpstreamProtocol, req.ProxySSLName, *req.ProxySSLVerify,
+		req.ProxySSLTrustedCAPEM, *req.ProxySSLVerifyDepth, *req.ProxyReadTimeout)
 	if err != nil {
 		tx.Rollback()
 		util.Fail(c, 500, err.Error())
@@ -171,13 +193,23 @@ func CreateRule(c *gin.Context) {
 		if w <= 0 {
 			w = 1
 		}
-		tx.Exec(`INSERT INTO upstream_servers(rule_id,address,port,weight,state) VALUES(?,?,?,?,?)`,
-			ruleID, s.Address, s.Port, w, state)
+		if _, err := tx.Exec(`INSERT INTO upstream_servers(rule_id,address,port,weight,state) VALUES(?,?,?,?,?)`,
+			ruleID, s.Address, s.Port, w, state); err != nil {
+			tx.Rollback()
+			util.Fail(c, 500, err.Error())
+			return
+		}
 	}
-	tx.Commit()
+	if err := tx.Commit(); err != nil {
+		util.Fail(c, 500, err.Error())
+		return
+	}
 
 	if err := engine.ApplyRule(ruleID); err != nil {
-		db.DB.Exec(`DELETE FROM rules WHERE id=?`, ruleID)
+		if _, rollbackErr := db.DB.Exec(`DELETE FROM rules WHERE id=?`, ruleID); rollbackErr != nil {
+			util.Fail(c, 500, "nginx配置生成失败且数据库回退失败: "+err.Error()+"; "+rollbackErr.Error())
+			return
+		}
 		util.Fail(c, 500, "nginx配置生成失败: "+err.Error())
 		return
 	}
@@ -192,6 +224,10 @@ func UpdateRule(c *gin.Context) {
 		util.Fail(c, 400, "参数错误")
 		return
 	}
+	if err := normalizeUpstreamReq(&req); err != nil {
+		util.Fail(c, 400, err.Error())
+		return
+	}
 	if err := validateRule(&req); err != nil {
 		util.Fail(c, 400, err.Error())
 		return
@@ -202,8 +238,17 @@ func UpdateRule(c *gin.Context) {
 	}
 
 	fillDefaults(&req)
+	oldRule, err := engine.LoadRule(id)
+	if err != nil {
+		util.Fail(c, 404, "规则不存在")
+		return
+	}
 
-	tx, _ := db.DB.Begin()
+	tx, err := db.DB.Begin()
+	if err != nil {
+		util.Fail(c, 500, err.Error())
+		return
+	}
 	var sslCertID interface{}
 	if req.SSLCertID != nil {
 		sslCertID = *req.SSLCertID
@@ -212,23 +257,30 @@ func UpdateRule(c *gin.Context) {
 	if req.HTTPSPort != nil {
 		httpsPort = *req.HTTPSPort
 	}
-	_, err := tx.Exec(`UPDATE rules SET name=?,protocol=?,listen_port=?,listen_stack=?,
+	_, err = tx.Exec(`UPDATE rules SET name=?,protocol=?,listen_port=?,listen_stack=?,
 		https_enabled=?,https_port=?,server_name=?,lb_method=?,
 		ssl_cert_id=?,ssl_redirect=?,hc_enabled=?,hc_interval=?,hc_timeout=?,hc_path=?,hc_host=?,
 		hc_rise=?,hc_fall=?,log_max_size=?,capture_max_size=?,custom_config=?,capture_body=?,
-		ip_acl_mode=?,ip_acl_list=?,updated_at=datetime('now','localtime')
+		ip_acl_mode=?,ip_acl_list=?,upstream_protocol=?,proxy_ssl_name=?,proxy_ssl_verify=?,
+		proxy_ssl_trusted_ca_pem=?,proxy_ssl_verify_depth=?,proxy_read_timeout=?,
+		updated_at=datetime('now','localtime')
 		WHERE id=?`,
 		req.Name, req.Protocol, req.ListenPort, req.ListenStack,
 		req.HTTPSEnabled, httpsPort, req.ServerName, req.LBMethod, sslCertID,
 		req.SSLRedirect, req.HCEnabled, req.HCInterval, req.HCTimeout, req.HCPath, req.HCHost,
 		req.HCRise, req.HCFall, req.LogMaxSize, req.CaptureMaxSize, req.CustomConfig, req.CaptureBody,
-		req.IPACLMode, req.IPACLList, id)
+		req.IPACLMode, req.IPACLList, req.UpstreamProtocol, req.ProxySSLName, *req.ProxySSLVerify,
+		req.ProxySSLTrustedCAPEM, *req.ProxySSLVerifyDepth, *req.ProxyReadTimeout, id)
 	if err != nil {
 		tx.Rollback()
 		util.Fail(c, 500, err.Error())
 		return
 	}
-	tx.Exec(`DELETE FROM upstream_servers WHERE rule_id=?`, id)
+	if _, err := tx.Exec(`DELETE FROM upstream_servers WHERE rule_id=?`, id); err != nil {
+		tx.Rollback()
+		util.Fail(c, 500, err.Error())
+		return
+	}
 	for _, s := range req.Servers {
 		state := s.State
 		if state == "" {
@@ -238,12 +290,23 @@ func UpdateRule(c *gin.Context) {
 		if w <= 0 {
 			w = 1
 		}
-		tx.Exec(`INSERT INTO upstream_servers(rule_id,address,port,weight,state) VALUES(?,?,?,?,?)`,
-			id, s.Address, s.Port, w, state)
+		if _, err := tx.Exec(`INSERT INTO upstream_servers(rule_id,address,port,weight,state) VALUES(?,?,?,?,?)`,
+			id, s.Address, s.Port, w, state); err != nil {
+			tx.Rollback()
+			util.Fail(c, 500, err.Error())
+			return
+		}
 	}
-	tx.Commit()
+	if err := tx.Commit(); err != nil {
+		util.Fail(c, 500, err.Error())
+		return
+	}
 
 	if err := engine.ApplyRule(id); err != nil {
+		if restoreErr := restoreRuleSnapshot(oldRule); restoreErr != nil {
+			util.Fail(c, 500, "nginx配置生成失败且数据库回退失败: "+err.Error()+"; "+restoreErr.Error())
+			return
+		}
 		util.Fail(c, 500, "nginx配置生成失败: "+err.Error())
 		return
 	}
@@ -258,8 +321,29 @@ func DeleteRule(c *gin.Context) {
 		return
 	}
 	health.StopRule(id)
-	engine.DeleteRule(id)
-	db.DB.Exec(`DELETE FROM rules WHERE id=?`, id)
+	if _, err := db.DB.Exec(`UPDATE rules SET status=0 WHERE id=?`, id); err != nil {
+		health.RestartRule(id)
+		util.Fail(c, 500, err.Error())
+		return
+	}
+	if err := engine.DeleteRule(id); err != nil {
+		_, _ = db.DB.Exec(`UPDATE rules SET status=1 WHERE id=?`, id)
+		health.RestartRule(id)
+		util.Fail(c, 500, err.Error())
+		return
+	}
+	if _, err := db.DB.Exec(`DELETE FROM rules WHERE id=?`, id); err != nil {
+		// DB 删除失败时尽力把 status 和 nginx 一起恢复，不留“DB 有规则但线上无配置”的半状态。
+		if _, statusErr := db.DB.Exec(`UPDATE rules SET status=1 WHERE id=?`, id); statusErr == nil {
+			if applyErr := engine.ApplyRule(id); applyErr == nil {
+				health.RestartRule(id)
+				util.Fail(c, 500, "删除数据库记录失败，已恢复规则: "+err.Error())
+				return
+			}
+		}
+		util.Fail(c, 500, "删除数据库记录失败，自动恢复也未完成: "+err.Error())
+		return
+	}
 	// tombstone 供从节点增量同步时删除对应规则
 	db.DB.Exec(`INSERT INTO sync_tombstones(table_name,record_key) VALUES('rules',?)`, strconv.FormatInt(id, 10))
 	util.OK(c, gin.H{"deleted": id})
@@ -271,8 +355,12 @@ func EnableRule(c *gin.Context) {
 		util.Fail(c, 400, "无效的规则 ID")
 		return
 	}
-	db.DB.Exec(`UPDATE rules SET status=1 WHERE id=?`, id)
+	if _, err := db.DB.Exec(`UPDATE rules SET status=1 WHERE id=?`, id); err != nil {
+		util.Fail(c, 500, err.Error())
+		return
+	}
 	if err := engine.ApplyRule(id); err != nil {
+		_, _ = db.DB.Exec(`UPDATE rules SET status=0 WHERE id=?`, id)
 		util.Fail(c, 500, err.Error())
 		return
 	}
@@ -286,10 +374,19 @@ func DisableRule(c *gin.Context) {
 		util.Fail(c, 400, "无效的规则 ID")
 		return
 	}
-	db.DB.Exec(`UPDATE rules SET status=0 WHERE id=?`, id)
 	health.StopRule(id)
-	// DeleteRule 内部已含 smartReload，无需再调 Reload
-	engine.DeleteRule(id)
+	if _, err := db.DB.Exec(`UPDATE rules SET status=0 WHERE id=?`, id); err != nil {
+		health.RestartRule(id)
+		util.Fail(c, 500, err.Error())
+		return
+	}
+	// DeleteRule 内部已含语法检查和 smartReload；失败时规则仍保持启用。
+	if err := engine.DeleteRule(id); err != nil {
+		_, _ = db.DB.Exec(`UPDATE rules SET status=1 WHERE id=?`, id)
+		health.RestartRule(id)
+		util.Fail(c, 500, err.Error())
+		return
+	}
 	util.OK(c, nil)
 }
 
@@ -337,6 +434,25 @@ func validateRule(r *ruleReq) error {
 	if len(r.Servers) == 0 {
 		return errMsg("至少需要一个后端节点")
 	}
+	if r.Protocol == "http" {
+		if r.ProxyReadTimeout == nil || *r.ProxyReadTimeout < 1 || *r.ProxyReadTimeout > 86400 {
+			return errMsg("proxy_read_timeout 必须在 1-86400 秒之间")
+		}
+		if r.UpstreamProtocol != "http" && r.UpstreamProtocol != "https" {
+			return errMsg("upstream_protocol 必须是 http/https")
+		}
+		if r.UpstreamProtocol == "https" {
+			if r.ProxySSLVerify == nil || (*r.ProxySSLVerify != 0 && *r.ProxySSLVerify != 1) {
+				return errMsg("proxy_ssl_verify 必须是 0/1")
+			}
+			if r.ProxySSLVerifyDepth == nil || *r.ProxySSLVerifyDepth < 1 || *r.ProxySSLVerifyDepth > 10 {
+				return errMsg("proxy_ssl_verify_depth 必须在 1-10 之间")
+			}
+			if _, err := engine.ResolveProxySSLName(r.ProxySSLName, r.ServerName); err != nil {
+				return err
+			}
+		}
+	}
 	// 规则级 IP 访问控制
 	validACL := map[string]bool{"": true, "off": true, "allow": true, "deny": true}
 	if !validACL[r.IPACLMode] {
@@ -354,6 +470,66 @@ func validateRule(r *ruleReq) error {
 			return errMsg("启用 IP 访问控制时，名单不能为空")
 		}
 	}
+	return nil
+}
+
+func intPtr(v int) *int { return &v }
+
+func normalizeUpstreamReq(r *ruleReq) error {
+	if r.UpstreamProtocol == "" {
+		r.UpstreamProtocol = engine.DefaultUpstreamProtocol
+	}
+	if r.ProxySSLVerify == nil {
+		r.ProxySSLVerify = intPtr(engine.DefaultProxySSLVerify)
+	}
+	if r.ProxySSLVerifyDepth == nil {
+		r.ProxySSLVerifyDepth = intPtr(engine.DefaultProxySSLVerifyDepth)
+	}
+	if r.ProxyReadTimeout == nil {
+		r.ProxyReadTimeout = intPtr(engine.DefaultProxyReadTimeout)
+	}
+
+	if r.Protocol != "http" {
+		r.UpstreamProtocol = engine.DefaultUpstreamProtocol
+		r.ProxySSLName = ""
+		r.ProxySSLVerify = intPtr(engine.DefaultProxySSLVerify)
+		r.ProxySSLTrustedCAPEM = ""
+		r.ProxySSLVerifyDepth = intPtr(engine.DefaultProxySSLVerifyDepth)
+		r.ProxyReadTimeout = intPtr(engine.DefaultProxyReadTimeout)
+		return nil
+	}
+
+	if r.UpstreamProtocol == "http" {
+		r.ProxySSLName = ""
+		r.ProxySSLVerify = intPtr(engine.DefaultProxySSLVerify)
+		r.ProxySSLTrustedCAPEM = ""
+		r.ProxySSLVerifyDepth = intPtr(engine.DefaultProxySSLVerifyDepth)
+		return nil
+	}
+	if r.UpstreamProtocol != "https" {
+		return errMsg("upstream_protocol 必须是 http/https")
+	}
+
+	if strings.TrimSpace(r.ProxySSLName) != "" {
+		name, err := engine.NormalizeProxySSLName(r.ProxySSLName)
+		if err != nil {
+			return errMsg("proxy_ssl_name " + err.Error())
+		}
+		r.ProxySSLName = name
+	}
+	if *r.ProxySSLVerify != 0 && *r.ProxySSLVerify != 1 {
+		return errMsg("proxy_ssl_verify 必须是 0/1")
+	}
+	if *r.ProxySSLVerify == 0 {
+		r.ProxySSLTrustedCAPEM = ""
+		r.ProxySSLVerifyDepth = intPtr(engine.DefaultProxySSLVerifyDepth)
+		return nil
+	}
+	ca, err := engine.NormalizeTrustedCAPEM(r.ProxySSLTrustedCAPEM)
+	if err != nil {
+		return err
+	}
+	r.ProxySSLTrustedCAPEM = ca
 	return nil
 }
 
@@ -517,4 +693,53 @@ func nullableInt64(n sql.NullInt64) interface{} {
 		return n.Int64
 	}
 	return nil
+}
+
+func restoreRuleSnapshot(r *model.Rule) error {
+	tx, err := db.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var httpsPort interface{}
+	if r.HTTPSPort != nil {
+		httpsPort = *r.HTTPSPort
+	}
+	var certID interface{}
+	if r.SSLCertID.Valid {
+		certID = r.SSLCertID.Int64
+	}
+	if _, err := tx.Exec(`UPDATE rules SET name=?,protocol=?,listen_port=?,listen_stack=?,
+		https_enabled=?,https_port=?,server_name=?,lb_method=?,ssl_cert_id=?,ssl_redirect=?,
+		hc_enabled=?,hc_interval=?,hc_timeout=?,hc_path=?,hc_host=?,hc_rise=?,hc_fall=?,
+		log_max_size=?,capture_max_size=?,custom_config=?,capture_body=?,ip_acl_mode=?,ip_acl_list=?,
+		upstream_protocol=?,proxy_ssl_name=?,proxy_ssl_verify=?,proxy_ssl_trusted_ca_pem=?,
+		proxy_ssl_verify_depth=?,proxy_read_timeout=?,status=?,updated_at=? WHERE id=?`,
+		r.Name, r.Protocol, r.ListenPort, r.ListenStack, r.HTTPSEnabled, httpsPort,
+		r.ServerName, r.LBMethod, certID, r.SSLRedirect, r.HCEnabled, r.HCInterval,
+		r.HCTimeout, r.HCPath, r.HCHost, r.HCRise, r.HCFall, r.LogMaxSize,
+		r.CaptureMaxSize, r.CustomConfig, r.CaptureBody, r.IPACLMode, r.IPACLList,
+		r.UpstreamProtocol, r.ProxySSLName, r.ProxySSLVerify, r.ProxySSLTrustedCAPEM,
+		r.ProxySSLVerifyDepth, r.ProxyReadTimeout, r.Status, r.UpdatedAt, r.ID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM upstream_servers WHERE rule_id=?`, r.ID); err != nil {
+		return err
+	}
+	for _, s := range r.Servers {
+		if _, err := tx.Exec(`INSERT INTO upstream_servers(id,rule_id,address,port,weight,state,
+			fail_count,success_count,last_check_at,last_err,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+			s.ID, s.RuleID, s.Address, s.Port, s.Weight, s.State, s.FailCount, s.SuccessCount,
+			nullIfEmpty(s.LastCheckAt), nullIfEmpty(s.LastErr), s.CreatedAt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func nullIfEmpty(v string) interface{} {
+	if v == "" {
+		return nil
+	}
+	return v
 }

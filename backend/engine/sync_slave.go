@@ -2,6 +2,7 @@ package engine
 
 import (
 	"crypto/md5"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -56,33 +57,105 @@ type syncServer struct {
 }
 
 type syncRule struct {
-	ID             int64        `json:"id"`
-	Name           string       `json:"name"`
-	Protocol       string       `json:"protocol"`
-	ListenPort     int64        `json:"listen_port"`
-	ListenStack    string       `json:"listen_stack"`
-	HttpsEnabled   int64        `json:"https_enabled"`
-	HttpsPort      int64        `json:"https_port"`
-	ServerName     string       `json:"server_name"`
-	LbMethod       string       `json:"lb_method"`
-	SslCertID      int64        `json:"ssl_cert_id"`
-	SslCertDomain  string       `json:"ssl_cert_domain"`
-	SslRedirect    int64        `json:"ssl_redirect"`
-	HcEnabled      int64        `json:"hc_enabled"`
-	HcInterval     int64        `json:"hc_interval"`
-	HcTimeout      int64        `json:"hc_timeout"`
-	HcPath         string       `json:"hc_path"`
-	HcHost         string       `json:"hc_host"`
-	HcFall         int64        `json:"hc_fall"`
-	HcRise         int64        `json:"hc_rise"`
-	LogMaxSize     string       `json:"log_max_size"`
-	CaptureMaxSize string       `json:"capture_max_size"`
-	CustomConfig   string       `json:"custom_config"`
-	CaptureBody    int64        `json:"capture_body"`
-	IPACLMode      string       `json:"ip_acl_mode"`
-	IPACLList      string       `json:"ip_acl_list"`
-	Status         int64        `json:"status"`
-	Servers        []syncServer `json:"servers"`
+	ID                   int64        `json:"id"`
+	Name                 string       `json:"name"`
+	Protocol             string       `json:"protocol"`
+	ListenPort           int64        `json:"listen_port"`
+	ListenStack          string       `json:"listen_stack"`
+	HttpsEnabled         int64        `json:"https_enabled"`
+	HttpsPort            int64        `json:"https_port"`
+	ServerName           string       `json:"server_name"`
+	LbMethod             string       `json:"lb_method"`
+	SslCertID            int64        `json:"ssl_cert_id"`
+	SslCertDomain        string       `json:"ssl_cert_domain"`
+	SslRedirect          int64        `json:"ssl_redirect"`
+	HcEnabled            int64        `json:"hc_enabled"`
+	HcInterval           int64        `json:"hc_interval"`
+	HcTimeout            int64        `json:"hc_timeout"`
+	HcPath               string       `json:"hc_path"`
+	HcHost               string       `json:"hc_host"`
+	HcFall               int64        `json:"hc_fall"`
+	HcRise               int64        `json:"hc_rise"`
+	LogMaxSize           string       `json:"log_max_size"`
+	CaptureMaxSize       string       `json:"capture_max_size"`
+	CustomConfig         string       `json:"custom_config"`
+	CaptureBody          int64        `json:"capture_body"`
+	IPACLMode            string       `json:"ip_acl_mode"`
+	IPACLList            string       `json:"ip_acl_list"`
+	UpstreamProtocol     string       `json:"upstream_protocol"`
+	ProxySSLName         string       `json:"proxy_ssl_name"`
+	ProxySSLVerify       *int64       `json:"proxy_ssl_verify"`
+	ProxySSLTrustedCAPEM string       `json:"proxy_ssl_trusted_ca_pem"`
+	ProxySSLVerifyDepth  *int64       `json:"proxy_ssl_verify_depth"`
+	ProxyReadTimeout     *int64       `json:"proxy_read_timeout"`
+	Status               int64        `json:"status"`
+	Servers              []syncServer `json:"servers"`
+}
+
+func int64Ptr(v int64) *int64 { return &v }
+
+func normalizeSyncRule(r *syncRule) error {
+	if r.UpstreamProtocol == "" {
+		r.UpstreamProtocol = DefaultUpstreamProtocol
+	}
+	if r.ProxySSLVerify == nil {
+		r.ProxySSLVerify = int64Ptr(DefaultProxySSLVerify)
+	}
+	if r.ProxySSLVerifyDepth == nil {
+		r.ProxySSLVerifyDepth = int64Ptr(DefaultProxySSLVerifyDepth)
+	}
+	if r.ProxyReadTimeout == nil {
+		r.ProxyReadTimeout = int64Ptr(DefaultProxyReadTimeout)
+	}
+	if r.Protocol != "http" {
+		r.UpstreamProtocol = DefaultUpstreamProtocol
+		r.ProxySSLName = ""
+		r.ProxySSLVerify = int64Ptr(DefaultProxySSLVerify)
+		r.ProxySSLTrustedCAPEM = ""
+		r.ProxySSLVerifyDepth = int64Ptr(DefaultProxySSLVerifyDepth)
+		r.ProxyReadTimeout = int64Ptr(DefaultProxyReadTimeout)
+		return nil
+	}
+	if *r.ProxyReadTimeout < 1 || *r.ProxyReadTimeout > 86400 {
+		return fmt.Errorf("rule %d proxy_read_timeout 超出范围", r.ID)
+	}
+	if r.UpstreamProtocol == "http" {
+		r.ProxySSLName = ""
+		r.ProxySSLVerify = int64Ptr(DefaultProxySSLVerify)
+		r.ProxySSLTrustedCAPEM = ""
+		r.ProxySSLVerifyDepth = int64Ptr(DefaultProxySSLVerifyDepth)
+		return nil
+	}
+	if r.UpstreamProtocol != "https" {
+		return fmt.Errorf("rule %d upstream_protocol 无效", r.ID)
+	}
+	if *r.ProxySSLVerify != 0 && *r.ProxySSLVerify != 1 {
+		return fmt.Errorf("rule %d proxy_ssl_verify 无效", r.ID)
+	}
+	if strings.TrimSpace(r.ProxySSLName) != "" {
+		name, err := NormalizeProxySSLName(r.ProxySSLName)
+		if err != nil {
+			return fmt.Errorf("rule %d proxy_ssl_name 无效: %w", r.ID, err)
+		}
+		r.ProxySSLName = name
+	}
+	if _, err := ResolveProxySSLName(r.ProxySSLName, r.ServerName); err != nil {
+		return fmt.Errorf("rule %d: %w", r.ID, err)
+	}
+	if *r.ProxySSLVerify == 0 {
+		r.ProxySSLTrustedCAPEM = ""
+		r.ProxySSLVerifyDepth = int64Ptr(DefaultProxySSLVerifyDepth)
+		return nil
+	}
+	if *r.ProxySSLVerifyDepth < 1 || *r.ProxySSLVerifyDepth > 10 {
+		return fmt.Errorf("rule %d proxy_ssl_verify_depth 超出范围", r.ID)
+	}
+	ca, err := NormalizeTrustedCAPEM(r.ProxySSLTrustedCAPEM)
+	if err != nil {
+		return fmt.Errorf("rule %d CA 无效: %w", r.ID, err)
+	}
+	r.ProxySSLTrustedCAPEM = ca
+	return nil
 }
 
 type syncCert struct {
@@ -114,12 +187,12 @@ type syncFilterWLItem struct {
 type syncRulesResp struct {
 	Code int `json:"code"`
 	Data struct {
-		Match           bool              `json:"match"`
-		MasterMD5       string            `json:"master_md5"`
-		Version         string            `json:"version"`
-		NginxConfigs    map[string]string `json:"nginx_configs"`
-		Rules           []syncRule        `json:"rules"`
-		FilterBlacklist []syncFilterItem  `json:"filter_blacklist"`
+		Match           bool               `json:"match"`
+		MasterMD5       string             `json:"master_md5"`
+		Version         string             `json:"version"`
+		NginxConfigs    map[string]string  `json:"nginx_configs"`
+		Rules           []syncRule         `json:"rules"`
+		FilterBlacklist []syncFilterItem   `json:"filter_blacklist"`
 		FilterWhitelist []syncFilterWLItem `json:"filter_whitelist"`
 	} `json:"data"`
 }
@@ -218,7 +291,9 @@ func LocalRulesMD5() string {
 		IFNULL(ssl_cert_id,0),ssl_redirect,hc_enabled,hc_interval,hc_timeout,
 		IFNULL(hc_path,'/'),IFNULL(hc_host,''),hc_fall,hc_rise,IFNULL(log_max_size,'5M'),
 		IFNULL(capture_max_size,'5M'),IFNULL(custom_config,''),IFNULL(capture_body,0),
-		IFNULL(ip_acl_mode,'off'),IFNULL(ip_acl_list,''),status FROM rules ORDER BY id ASC`)
+		IFNULL(ip_acl_mode,'off'),IFNULL(ip_acl_list,''),IFNULL(upstream_protocol,'http'),
+		IFNULL(proxy_ssl_name,''),IFNULL(proxy_ssl_verify,1),IFNULL(proxy_ssl_trusted_ca_pem,''),
+		IFNULL(proxy_ssl_verify_depth,5),IFNULL(proxy_read_timeout,60),status FROM rules ORDER BY id ASC`)
 	if rrows != nil {
 		for rrows.Next() {
 			var r row
@@ -227,7 +302,9 @@ func LocalRulesMD5() string {
 				&r.sslCertID, &r.fp.SSLRedirect, &r.fp.HCEnabled, &r.fp.HCInterval, &r.fp.HCTimeout,
 				&r.fp.HCPath, &r.fp.HCHost, &r.fp.HCFall, &r.fp.HCRise, &r.fp.LogMaxSize,
 				&r.fp.CaptureMaxSize, &r.fp.CustomConfig, &r.fp.CaptureBody,
-				&r.fp.IPACLMode, &r.fp.IPACLList, &r.fp.Status)
+				&r.fp.IPACLMode, &r.fp.IPACLList, &r.fp.UpstreamProtocol, &r.fp.ProxySSLName,
+				&r.fp.ProxySSLVerify, &r.fp.ProxySSLTrustedCAPEM, &r.fp.ProxySSLVerifyDepth,
+				&r.fp.ProxyReadTimeout, &r.fp.Status)
 			rules = append(rules, r)
 		}
 		rrows.Close()
@@ -317,7 +394,7 @@ func pullAndApplyRules(masterURL, token string) error {
 	masterURL = strings.TrimRight(masterURL, "/")
 
 	localMD5 := LocalRulesMD5()
-	reqURL := fmt.Sprintf("%s/api/v1/sync/rules_export?token=%s&md5=%s", masterURL, token, localMD5)
+	reqURL := fmt.Sprintf("%s/api/v1/sync/rules_export?token=%s&md5=%s&caps=https_upstream_v1", masterURL, token, localMD5)
 
 	resp, err := syncHTTPClient.Get(reqURL)
 	if err != nil {
@@ -376,20 +453,179 @@ func isAllDigits(s string) bool {
 	return true
 }
 
+func validRuleConfigName(name string) bool {
+	if filepath.Base(name) != name {
+		return false
+	}
+	for _, suffix := range []string{"-http.conf", "-stream.conf"} {
+		if strings.HasSuffix(name, suffix) {
+			return isAllDigits(strings.TrimSuffix(name, suffix))
+		}
+	}
+	return false
+}
+
+func snapshotRuleConfs(confDir string) map[string]fileSnapshot {
+	result := map[string]fileSnapshot{}
+	for _, suffix := range []string{"-http.conf", "-stream.conf"} {
+		paths, _ := filepath.Glob(filepath.Join(confDir, "*"+suffix))
+		for _, path := range paths {
+			if validRuleConfigName(filepath.Base(path)) {
+				result[path] = snapshotFile(path)
+			}
+		}
+	}
+	return result
+}
+
+func restoreRuleConfs(confDir string, snaps map[string]fileSnapshot) {
+	for _, suffix := range []string{"-http.conf", "-stream.conf"} {
+		paths, _ := filepath.Glob(filepath.Join(confDir, "*"+suffix))
+		for _, path := range paths {
+			if validRuleConfigName(filepath.Base(path)) {
+				_ = os.Remove(path)
+			}
+		}
+	}
+	for path, snap := range snaps {
+		restoreFile(path, snap)
+	}
+}
+
+func managedCAFile(path string) bool {
+	base := filepath.Base(path)
+	return strings.HasPrefix(base, "rule-") && strings.HasSuffix(base, ".pem") &&
+		isAllDigits(strings.TrimSuffix(strings.TrimPrefix(base, "rule-"), ".pem"))
+}
+
+func snapshotManagedUpstreamCAs() map[string]fileSnapshot {
+	dir := filepath.Join(config.Global.Nginx.CertDir, "_upstream_ca")
+	result := map[string]fileSnapshot{}
+	paths, _ := filepath.Glob(filepath.Join(dir, "rule-*.pem"))
+	for _, path := range paths {
+		if managedCAFile(path) {
+			result[path] = snapshotFile(path)
+		}
+	}
+	return result
+}
+
+func restoreManagedUpstreamCAs(snaps map[string]fileSnapshot) {
+	dir := filepath.Join(config.Global.Nginx.CertDir, "_upstream_ca")
+	paths, _ := filepath.Glob(filepath.Join(dir, "rule-*.pem"))
+	for _, path := range paths {
+		if managedCAFile(path) {
+			_ = os.Remove(path)
+		}
+	}
+	for path, snap := range snaps {
+		restoreFile(path, snap)
+	}
+}
+
+func pruneStaleUpstreamCAs(keep map[int64]bool) {
+	dir := filepath.Join(config.Global.Nginx.CertDir, "_upstream_ca")
+	paths, _ := filepath.Glob(filepath.Join(dir, "rule-*.pem"))
+	for _, path := range paths {
+		if !managedCAFile(path) {
+			continue
+		}
+		idText := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), "rule-"), ".pem")
+		id, _ := strconv.ParseInt(idText, 10, 64)
+		if !keep[id] {
+			_ = os.Remove(path)
+		}
+	}
+}
+
+func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".sync-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return nil
+}
+
 func applyRulesFull(result syncRulesResp) error {
+	for i := range result.Data.Rules {
+		if err := normalizeSyncRule(&result.Data.Rules[i]); err != nil {
+			return err
+		}
+	}
 	confDir := config.Global.Nginx.ConfDir
 	if err := os.MkdirAll(confDir, 0755); err != nil {
 		return fmt.Errorf("创建 conf 目录失败: %v", err)
 	}
+	confSnaps := snapshotRuleConfs(confDir)
+	caSnaps := snapshotManagedUpstreamCAs()
+	defaultSnaps := snapshotDefaultConfs()
+	restoreFiles := func() {
+		restoreRuleConfs(confDir, confSnaps)
+		restoreManagedUpstreamCAs(caSnaps)
+		restoreDefaultConfs(defaultSnaps)
+	}
+	keepCA := map[int64]bool{}
+	for _, r := range result.Data.Rules {
+		ca := ""
+		if r.Status == 1 && r.UpstreamProtocol == "https" && *r.ProxySSLVerify == 1 && r.ProxySSLTrustedCAPEM != "" {
+			ca = r.ProxySSLTrustedCAPEM
+			keepCA[r.ID] = true
+		}
+		if err := SyncUpstreamCAFile(r.ID, ca); err != nil {
+			restoreFiles()
+			return fmt.Errorf("写入 rule %d 回源 CA 失败: %v", r.ID, err)
+		}
+	}
+	pruneStaleUpstreamCAs(keepCA)
 	for filename, content := range result.Data.NginxConfigs {
-		if err := os.WriteFile(filepath.Join(confDir, filename), []byte(content), 0644); err != nil {
+		if !validRuleConfigName(filename) {
+			restoreFiles()
+			return fmt.Errorf("主节点下发了非法配置文件名: %s", filename)
+		}
+		if err := writeFileAtomic(filepath.Join(confDir, filename), []byte(content), 0644); err != nil {
+			restoreFiles()
 			return fmt.Errorf("写入 %s 失败: %v", filename, err)
 		}
 	}
 	// 清理 master 不再下发的规则 conf（禁用/删除的规则）
 	pruneStaleRuleConfs(confDir, result.Data.NginxConfigs)
+	if out, err := runNginxCmd("-t"); err != nil {
+		restoreFiles()
+		return fmt.Errorf("nginx 语法错误，已恢复旧配置: %s", out)
+	}
 
 	masterCount := len(result.Data.Rules)
+	tx, err := db.DB.Begin()
+	if err != nil {
+		restoreFiles()
+		return err
+	}
+	defer tx.Rollback()
 	if masterCount > 0 {
 		masterIDs := make([]interface{}, masterCount)
 		ph := make([]string, masterCount)
@@ -397,22 +633,59 @@ func applyRulesFull(result syncRulesResp) error {
 			masterIDs[i] = r.ID
 			ph[i] = "?"
 		}
-		db.DB.Exec("DELETE FROM rules WHERE id NOT IN ("+strings.Join(ph, ",")+
-			") AND id IS NOT NULL", masterIDs...)
-		upsertRules(result.Data.Rules)
+		if _, err := tx.Exec("DELETE FROM rules WHERE id NOT IN ("+strings.Join(ph, ",")+
+			") AND id IS NOT NULL", masterIDs...); err != nil {
+			restoreFiles()
+			return err
+		}
+		if err := upsertRulesTx(tx, result.Data.Rules); err != nil {
+			restoreFiles()
+			return err
+		}
 	} else {
-		db.DB.Exec(`DELETE FROM rules`)
-		db.DB.Exec(`DELETE FROM upstream_servers`)
+		if _, err := tx.Exec(`DELETE FROM upstream_servers`); err != nil {
+			restoreFiles()
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM rules`); err != nil {
+			restoreFiles()
+			return err
+		}
 	}
 
-	applyFilterFromRulesResp(result)
-
-	// 同步后刷新 catch-all default_server（含 HTTPS 443），保证禁用/删除规则后未匹配域名统一返回“网站不存在”
-	SyncPortDefaults()
-
+	if err := applyFilterFromRulesRespTx(tx, result); err != nil {
+		restoreFiles()
+		return err
+	}
 	if err := Reload(); err != nil {
-		return fmt.Errorf("nginx 重载失败: %v", err)
+		restoreFiles()
+		if _, testErr := runNginxCmd("-t"); testErr == nil {
+			_ = Reload()
+		}
+		return fmt.Errorf("nginx 重载失败，已恢复旧配置: %v", err)
 	}
+	if err := tx.Commit(); err != nil {
+		restoreFiles()
+		if _, testErr := runNginxCmd("-t"); testErr == nil {
+			_ = Reload()
+		}
+		return fmt.Errorf("提交同步数据库失败，已恢复旧配置: %v", err)
+	}
+
+	// 数据库和规则文件都生效后刷新 catch-all；失败时只恢复其旧文件，不破坏已提交规则。
+	if err := SyncPortDefaults(); err != nil {
+		restoreDefaultConfs(defaultSnaps)
+		return fmt.Errorf("同步 catch-all 失败，已恢复旧 catch-all: %v", err)
+	}
+	if out, err := runNginxCmd("-t"); err != nil {
+		restoreDefaultConfs(defaultSnaps)
+		return fmt.Errorf("同步 catch-all 后 nginx 语法错误，已恢复旧 catch-all: %s", out)
+	}
+	if err := Reload(); err != nil {
+		restoreDefaultConfs(defaultSnaps)
+		return fmt.Errorf("同步 catch-all 后 nginx 重载失败: %v", err)
+	}
+	go ApplyFilter()
 
 	msg := fmt.Sprintf("同步完成，规则 %d 条（MD5: %s）", masterCount, shortV(result.Data.MasterMD5))
 	setSyncStatus("slave_rules", "ok", msg)
@@ -420,13 +693,13 @@ func applyRulesFull(result syncRulesResp) error {
 	return nil
 }
 
-func upsertRules(rules []syncRule) {
+func upsertRulesTx(tx *sql.Tx, rules []syncRule) error {
 	for _, r := range rules {
 		// 证书引用按域名重映射到本地 ssl_certs 的 id（主从证书 id 各自自增，不能直接套用主站 id）
 		var sslCertID interface{}
 		if r.SslCertDomain != "" {
 			var localID int64
-			if err := db.DB.QueryRow(`SELECT id FROM ssl_certs WHERE domain=?`, r.SslCertDomain).Scan(&localID); err == nil && localID > 0 {
+			if err := tx.QueryRow(`SELECT id FROM ssl_certs WHERE domain=?`, r.SslCertDomain).Scan(&localID); err == nil && localID > 0 {
 				sslCertID = localID
 			}
 		} else if r.SslCertID > 0 {
@@ -436,11 +709,13 @@ func upsertRules(rules []syncRule) {
 		if captureMaxSize == "" {
 			captureMaxSize = "5M"
 		}
-		db.DB.Exec(`INSERT INTO rules(id,name,protocol,listen_port,listen_stack,
+		if _, err := tx.Exec(`INSERT INTO rules(id,name,protocol,listen_port,listen_stack,
 			https_enabled,https_port,server_name,lb_method,ssl_cert_id,ssl_redirect,
 			hc_enabled,hc_interval,hc_timeout,hc_path,hc_host,hc_fall,hc_rise,
-			log_max_size,capture_max_size,custom_config,capture_body,ip_acl_mode,ip_acl_list,status)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			log_max_size,capture_max_size,custom_config,capture_body,ip_acl_mode,ip_acl_list,
+			upstream_protocol,proxy_ssl_name,proxy_ssl_verify,proxy_ssl_trusted_ca_pem,
+			proxy_ssl_verify_depth,proxy_read_timeout,status)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 			ON CONFLICT(id) DO UPDATE SET
 			name=excluded.name, protocol=excluded.protocol, listen_port=excluded.listen_port,
 			listen_stack=excluded.listen_stack, https_enabled=excluded.https_enabled,
@@ -453,38 +728,77 @@ func upsertRules(rules []syncRule) {
 			log_max_size=excluded.log_max_size, capture_max_size=excluded.capture_max_size,
 			custom_config=excluded.custom_config, capture_body=excluded.capture_body,
 			ip_acl_mode=excluded.ip_acl_mode, ip_acl_list=excluded.ip_acl_list,
+				upstream_protocol=excluded.upstream_protocol, proxy_ssl_name=excluded.proxy_ssl_name,
+				proxy_ssl_verify=excluded.proxy_ssl_verify,
+				proxy_ssl_trusted_ca_pem=excluded.proxy_ssl_trusted_ca_pem,
+				proxy_ssl_verify_depth=excluded.proxy_ssl_verify_depth,
+				proxy_read_timeout=excluded.proxy_read_timeout,
 			status=excluded.status`,
 			r.ID, r.Name, r.Protocol, r.ListenPort, r.ListenStack,
 			r.HttpsEnabled, r.HttpsPort, r.ServerName, r.LbMethod, sslCertID, r.SslRedirect,
 			r.HcEnabled, r.HcInterval, r.HcTimeout, r.HcPath, r.HcHost, r.HcFall, r.HcRise,
 			r.LogMaxSize, captureMaxSize, r.CustomConfig, r.CaptureBody,
-			normalizeACLMode(r.IPACLMode), r.IPACLList, r.Status)
+			normalizeACLMode(r.IPACLMode), r.IPACLList, r.UpstreamProtocol, r.ProxySSLName,
+			*r.ProxySSLVerify, r.ProxySSLTrustedCAPEM, *r.ProxySSLVerifyDepth,
+			*r.ProxyReadTimeout, r.Status); err != nil {
+			return err
+		}
 
-		db.DB.Exec(`DELETE FROM upstream_servers WHERE rule_id=?`, r.ID)
+		if _, err := tx.Exec(`DELETE FROM upstream_servers WHERE rule_id=?`, r.ID); err != nil {
+			return err
+		}
 		for _, s := range r.Servers {
-			db.DB.Exec(`INSERT INTO upstream_servers(rule_id,address,port,weight,state) VALUES(?,?,?,?,?)`,
-				r.ID, s.Address, s.Port, s.Weight, s.State)
+			if _, err := tx.Exec(`INSERT INTO upstream_servers(rule_id,address,port,weight,state) VALUES(?,?,?,?,?)`,
+				r.ID, s.Address, s.Port, s.Weight, s.State); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
-func applyFilterFromRulesResp(result syncRulesResp) {
+func upsertRules(rules []syncRule) error {
+	for i := range rules {
+		if err := normalizeSyncRule(&rules[i]); err != nil {
+			return err
+		}
+	}
+	tx, err := db.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := upsertRulesTx(tx, rules); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func applyFilterFromRulesRespTx(tx *sql.Tx, result syncRulesResp) error {
 	if len(result.Data.FilterBlacklist) == 0 && len(result.Data.FilterWhitelist) == 0 {
-		return
+		return nil
 	}
-	db.DB.Exec(`DELETE FROM filter_blacklist WHERE auto_added=0`)
+	if _, err := tx.Exec(`DELETE FROM filter_blacklist WHERE auto_added=0`); err != nil {
+		return err
+	}
 	for _, item := range result.Data.FilterBlacklist {
-		db.DB.Exec(`INSERT OR IGNORE INTO filter_blacklist(type,value,note,hits,auto_added,enabled) VALUES(?,?,?,?,?,?)`,
-			item.Type, item.Value, item.Note, item.Hits, item.AutoAdded, item.Enabled)
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO filter_blacklist(type,value,note,hits,auto_added,enabled) VALUES(?,?,?,?,?,?)`,
+			item.Type, item.Value, item.Note, item.Hits, item.AutoAdded, item.Enabled); err != nil {
+			return err
+		}
 	}
-	db.DB.Exec(`DELETE FROM filter_whitelist`)
+	if _, err := tx.Exec(`DELETE FROM filter_whitelist`); err != nil {
+		return err
+	}
 	for _, item := range result.Data.FilterWhitelist {
-		db.DB.Exec(`INSERT OR IGNORE INTO filter_whitelist(type,value,note,enabled) VALUES(?,?,?,?)`,
-			item.Type, item.Value, item.Note, item.Enabled)
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO filter_whitelist(type,value,note,enabled) VALUES(?,?,?,?)`,
+			item.Type, item.Value, item.Note, item.Enabled); err != nil {
+			return err
+		}
 	}
-	go ApplyFilter()
 	log.Printf("[slave-rules] 顺带同步黑名单 %d 条，白名单 %d 条",
 		len(result.Data.FilterBlacklist), len(result.Data.FilterWhitelist))
+	return nil
 }
 
 // ── 证书同步 agent ────────────────────────────────────────────────────────────
@@ -604,7 +918,7 @@ func StartSlaveSyncAgent() {
 
 func pullAndApply(masterURL, token string) error {
 	masterURL = strings.TrimRight(masterURL, "/")
-	reqURL := fmt.Sprintf("%s/api/v1/sync/export?token=%s", masterURL, token)
+	reqURL := fmt.Sprintf("%s/api/v1/sync/export?token=%s&caps=https_upstream_v1", masterURL, token)
 	resp, err := syncHTTPClient.Get(reqURL)
 	if err != nil {
 		return fmt.Errorf("请求主节点失败: %v", err)
@@ -629,29 +943,6 @@ func pullAndApply(masterURL, token string) error {
 		return nil
 	}
 
-	confDir := config.Global.Nginx.ConfDir
-	if err := os.MkdirAll(confDir, 0755); err != nil {
-		return fmt.Errorf("创建 conf 目录失败: %v", err)
-	}
-	for filename, content := range result.Data.NginxConfigs {
-		if err := os.WriteFile(filepath.Join(confDir, filename), []byte(content), 0644); err != nil {
-			return fmt.Errorf("写入 %s 失败: %v", filename, err)
-		}
-	}
-	// 清理 master 不再下发的规则 conf（禁用/删除的规则）
-	pruneStaleRuleConfs(confDir, result.Data.NginxConfigs)
-
-	if len(result.Data.Rules) > 0 {
-		masterIDs := make([]interface{}, len(result.Data.Rules))
-		ph := make([]string, len(result.Data.Rules))
-		for i, r := range result.Data.Rules {
-			masterIDs[i] = r.ID
-			ph[i] = "?"
-		}
-		db.DB.Exec("DELETE FROM rules WHERE id NOT IN ("+strings.Join(ph, ",")+")", masterIDs...)
-		upsertRules(result.Data.Rules)
-	}
-
 	// parseCerts 兼容旧主节点 map 格式和新 array 格式
 	var certs []syncCert
 	if err := json.Unmarshal(result.Data.Certs, &certs); err != nil {
@@ -665,23 +956,19 @@ func pullAndApply(masterURL, token string) error {
 			}
 		}
 	}
-	for _, cert := range certs {
-		expireAt := cert.ExpireAt
-		if expireAt == "" {
-			expireAt = "2099-01-01 00:00:00"
-		}
-		db.DB.Exec(`INSERT INTO ssl_certs(domain,cert_pem,key_pem,expire_at,auto_renew)
-			VALUES(?,?,?,?,0)
-			ON CONFLICT(domain) DO UPDATE SET
-			cert_pem=excluded.cert_pem, key_pem=excluded.key_pem, expire_at=excluded.expire_at, auto_renew=0`,
-			cert.Domain, cert.CertPEM, cert.KeyPEM, expireAt)
-		if err := WriteCert(cert.Domain, cert.CertPEM, cert.KeyPEM); err != nil {
-			log.Printf("[slave-sync] 写入证书文件 %s 失败: %v", cert.Domain, err)
-		}
+	certResp := syncCertsResp{}
+	certResp.Data.Certs = certs
+	certResp.Data.MasterMD5 = newVersion
+	if err := applyCertsFull(certResp); err != nil {
+		return err
 	}
-
-	if err := Reload(); err != nil {
-		return fmt.Errorf("nginx 重载失败: %v", err)
+	rulesResp := syncRulesResp{}
+	rulesResp.Data.MasterMD5 = newVersion
+	rulesResp.Data.Version = newVersion
+	rulesResp.Data.NginxConfigs = result.Data.NginxConfigs
+	rulesResp.Data.Rules = result.Data.Rules
+	if err := applyRulesFull(rulesResp); err != nil {
+		return err
 	}
 
 	lastSyncVersion = newVersion

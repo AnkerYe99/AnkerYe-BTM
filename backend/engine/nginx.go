@@ -113,13 +113,18 @@ func LoadRule(ruleID int64) (*model.Rule, error) {
 		https_enabled,https_port,server_name,lb_method,ssl_cert_id,ssl_redirect,
 		hc_enabled,hc_interval,hc_timeout,hc_path,IFNULL(hc_host,''),hc_rise,hc_fall,
 		log_max_size,IFNULL(capture_max_size,'5M'),custom_config,IFNULL(capture_body,0),
-		IFNULL(ip_acl_mode,'off'),IFNULL(ip_acl_list,''),status,created_at,updated_at
+		IFNULL(ip_acl_mode,'off'),IFNULL(ip_acl_list,''),
+		IFNULL(upstream_protocol,'http'),IFNULL(proxy_ssl_name,''),IFNULL(proxy_ssl_verify,1),
+		IFNULL(proxy_ssl_trusted_ca_pem,''),IFNULL(proxy_ssl_verify_depth,5),
+		IFNULL(proxy_read_timeout,60),status,created_at,updated_at
 		FROM rules WHERE id=?`, ruleID)
 	err := row.Scan(&r.ID, &r.Name, &r.Protocol, &r.ListenPort, &stack,
 		&r.HTTPSEnabled, &httpsPort, &r.ServerName, &r.LBMethod,
 		&certID, &r.SSLRedirect, &r.HCEnabled, &r.HCInterval, &r.HCTimeout, &r.HCPath, &r.HCHost,
 		&r.HCRise, &r.HCFall, &r.LogMaxSize, &r.CaptureMaxSize, &r.CustomConfig, &r.CaptureBody,
-		&r.IPACLMode, &r.IPACLList, &r.Status, &r.CreatedAt, &r.UpdatedAt)
+		&r.IPACLMode, &r.IPACLList, &r.UpstreamProtocol, &r.ProxySSLName, &r.ProxySSLVerify,
+		&r.ProxySSLTrustedCAPEM, &r.ProxySSLVerifyDepth, &r.ProxyReadTimeout,
+		&r.Status, &r.CreatedAt, &r.UpdatedAt)
 	if stack.Valid {
 		r.ListenStack = stack.String
 	}
@@ -133,6 +138,7 @@ func LoadRule(ruleID int64) (*model.Rule, error) {
 	if err != nil {
 		return nil, err
 	}
+	NormalizeRuleUpstreamDefaults(r)
 	if certID.Valid {
 		r.SSLCertID = certID
 		v := certID.Int64
@@ -174,7 +180,7 @@ func RenderRule(r *model.Rule) (string, error) {
 
 	switch r.Protocol {
 	case "http":
-		return renderHTTP(r, upServers), nil
+		return renderHTTP(r, upServers)
 	case "tcp", "udp", "tcpudp":
 		return renderStream(r, upServers), nil
 	}
@@ -285,7 +291,7 @@ func renderIPACL(mode, list string) string {
 	return sb.String()
 }
 
-func proxyBlock(id int64) string {
+func legacyProxyBlock(id int64) string {
 	return fmt.Sprintf(`    location / {
         if ($__nf_block) {
             return 444;
@@ -303,7 +309,51 @@ func proxyBlock(id int64) string {
 `, id)
 }
 
-func renderHTTP(r *model.Rule, servers []model.Server) string {
+func proxyBlock(r *model.Rule) (string, error) {
+	NormalizeRuleUpstreamDefaults(r)
+	if r.UpstreamProtocol == "http" && r.ProxyReadTimeout == DefaultProxyReadTimeout {
+		return legacyProxyBlock(r.ID), nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("    location / {\n")
+	sb.WriteString("        if ($__nf_block) {\n")
+	sb.WriteString("            return 444;\n")
+	sb.WriteString("        }\n")
+	sb.WriteString(fmt.Sprintf("        proxy_pass %s://nf_%d;\n", r.UpstreamProtocol, r.ID))
+	sb.WriteString("        proxy_http_version 1.1;\n")
+	sb.WriteString("        proxy_set_header Connection \"\";\n")
+	sb.WriteString("        proxy_set_header Host $host;\n")
+	sb.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
+	sb.WriteString("        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n")
+	sb.WriteString("        proxy_set_header X-Forwarded-Proto $scheme;\n")
+	sb.WriteString("        proxy_connect_timeout 5s;\n")
+	sb.WriteString(fmt.Sprintf("        proxy_read_timeout %ds;\n", r.ProxyReadTimeout))
+	if r.UpstreamProtocol == "https" {
+		sslName, err := ResolveProxySSLName(r.ProxySSLName, r.ServerName)
+		if err != nil {
+			return "", err
+		}
+		sb.WriteString("        proxy_ssl_server_name on;\n")
+		sb.WriteString(fmt.Sprintf("        proxy_ssl_name %s;\n", sslName))
+		sb.WriteString("        proxy_ssl_protocols TLSv1.2 TLSv1.3;\n")
+		if r.ProxySSLVerify == 0 {
+			sb.WriteString("        proxy_ssl_verify off;\n")
+		} else {
+			sb.WriteString("        proxy_ssl_verify on;\n")
+			caPath := SystemTrustedCAPath
+			if r.ProxySSLTrustedCAPEM != "" {
+				caPath = UpstreamCAPath(r.ID)
+			}
+			sb.WriteString(fmt.Sprintf("        proxy_ssl_trusted_certificate %s;\n", caPath))
+			sb.WriteString(fmt.Sprintf("        proxy_ssl_verify_depth %d;\n", r.ProxySSLVerifyDepth))
+		}
+	}
+	sb.WriteString("    }\n")
+	return sb.String(), nil
+}
+
+func renderHTTP(r *model.Rule, servers []model.Server) (string, error) {
 	var sb strings.Builder
 	sn := strings.ToLower(strings.TrimSpace(r.ServerName))
 	if sn == "" {
@@ -344,7 +394,11 @@ func renderHTTP(r *model.Rule, servers []model.Server) string {
 				sb.WriteString(fmt.Sprintf("    return 301 https://$host:%d$request_uri;\n", *r.HTTPSPort))
 			}
 		} else {
-			sb.WriteString(proxyBlock(r.ID))
+			block, err := proxyBlock(r)
+			if err != nil {
+				return "", err
+			}
+			sb.WriteString(block)
 			if r.CustomConfig != "" {
 				sb.WriteString("    " + r.CustomConfig + "\n")
 			}
@@ -369,14 +423,18 @@ func renderHTTP(r *model.Rule, servers []model.Server) string {
 		sb.WriteString(fmt.Sprintf("    error_log  %s/rule_%d_error.log warn;\n", config.Global.Nginx.LogDir, r.ID))
 		sb.WriteString(filterCheckBlock())
 		sb.WriteString(renderIPACL(r.IPACLMode, r.IPACLList))
-		sb.WriteString(proxyBlock(r.ID))
+		block, err := proxyBlock(r)
+		if err != nil {
+			return "", err
+		}
+		sb.WriteString(block)
 		if r.CustomConfig != "" {
 			sb.WriteString("    " + r.CustomConfig + "\n")
 		}
 		sb.WriteString("}\n")
 	}
 
-	return sb.String()
+	return sb.String(), nil
 }
 
 func renderStream(r *model.Rule, servers []model.Server) string {
@@ -442,12 +500,13 @@ func isNamedSN(sn string) bool {
 // For every HTTP port that has named-domain rules but no wildcard rule,
 // it writes a default_server block returning 403 so unmatched Host headers are rejected.
 // HTTPS ports are skipped — TLS handshake failure is the natural reject.
-func SyncPortDefaults() {
+func SyncPortDefaults() error {
 	rows, err := db.DB.Query(`SELECT listen_port, listen_stack, https_enabled, https_port, server_name
 		FROM rules WHERE protocol='http' AND status=1`)
 	if err != nil {
-		return
+		return err
 	}
+	defer rows.Close()
 	type portState struct {
 		stack       string
 		hasWildcard bool
@@ -465,7 +524,9 @@ func SyncPortDefaults() {
 		var port, httpsEnabled int
 		var stack, sn string
 		var httpsPort sql.NullInt64
-		rows.Scan(&port, &stack, &httpsEnabled, &httpsPort, &sn)
+		if err := rows.Scan(&port, &stack, &httpsEnabled, &httpsPort, &sn); err != nil {
+			return err
+		}
 		if stack == "" {
 			stack = "both"
 		}
@@ -487,15 +548,19 @@ func SyncPortDefaults() {
 			}
 		}
 	}
-	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
 
 	// catchCertDir 在存在 HTTPS 端口时按需生成自签证书
 	catchCertDir := ""
 	for _, ps := range ports {
 		if ps.isHTTPS {
-			if d, err := ensureCatchAllCert(); err == nil {
-				catchCertDir = d
+			d, err := ensureCatchAllCert()
+			if err != nil {
+				return fmt.Errorf("准备 HTTPS catch-all 证书失败: %w", err)
 			}
+			catchCertDir = d
 			break
 		}
 	}
@@ -516,9 +581,13 @@ func SyncPortDefaults() {
 				content += "    default_type text/html;\n"
 				content += "    return 404 \"" + catchAllBody + "\";\n"
 				content += "}\n"
-				os.WriteFile(path, []byte(content), 0644)
+				if err := writeFileAtomic(path, []byte(content), 0644); err != nil {
+					return err
+				}
 			} else {
-				os.Remove(path)
+				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+					return err
+				}
 			}
 		} else if ps.hasNamed && !ps.hasWildcard {
 			// HTTP 端口：仅有具名域名且无通配规则时，生成 catch-all default_server
@@ -528,36 +597,94 @@ func SyncPortDefaults() {
 			content += "    default_type text/html;\n"
 			content += "    return 404 \"" + catchAllBody + "\";\n"
 			content += "}\n"
-			os.WriteFile(path, []byte(content), 0644)
+			if err := writeFileAtomic(path, []byte(content), 0644); err != nil {
+				return err
+			}
 		} else {
-			os.Remove(path)
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return err
+			}
 		}
 	}
 
 	// 清理已不存在端口的遗留文件
-	existing, _ := filepath.Glob(filepath.Join(config.Global.Nginx.ConfDir, "default-*-http.conf"))
+	existing, err := filepath.Glob(filepath.Join(config.Global.Nginx.ConfDir, "default-*-http.conf"))
+	if err != nil {
+		return err
+	}
 	for _, f := range existing {
 		base := filepath.Base(f)
 		var p int
 		fmt.Sscanf(base, "default-%d-http.conf", &p)
 		if _, ok := ports[p]; !ok {
-			os.Remove(f)
+			if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
+				return err
+			}
 		}
+	}
+	return nil
+}
+
+type fileSnapshot struct {
+	exists bool
+	data   []byte
+	mode   os.FileMode
+}
+
+func snapshotFile(path string) fileSnapshot {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fileSnapshot{}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fileSnapshot{}
+	}
+	return fileSnapshot{exists: true, data: data, mode: info.Mode().Perm()}
+}
+
+func restoreFile(path string, snap fileSnapshot) {
+	if !snap.exists {
+		_ = os.Remove(path)
+		return
+	}
+	mode := snap.mode
+	if mode == 0 {
+		mode = 0644
+	}
+	_ = os.WriteFile(path, snap.data, mode)
+}
+
+func snapshotDefaultConfs() map[string]fileSnapshot {
+	result := map[string]fileSnapshot{}
+	paths, _ := filepath.Glob(filepath.Join(config.Global.Nginx.ConfDir, "default-*-http.conf"))
+	for _, path := range paths {
+		result[path] = snapshotFile(path)
+	}
+	return result
+}
+
+func restoreDefaultConfs(snaps map[string]fileSnapshot) {
+	paths, _ := filepath.Glob(filepath.Join(config.Global.Nginx.ConfDir, "default-*-http.conf"))
+	for _, path := range paths {
+		if _, ok := snaps[path]; !ok {
+			_ = os.Remove(path)
+		}
+	}
+	for path, snap := range snaps {
+		restoreFile(path, snap)
 	}
 }
 
-// 写入 nginx 配置文件并 reload
+// 写入 nginx 配置文件并 reload。文件、CA、catch-all 任一步失败都会恢复原状态。
 func ApplyRule(ruleID int64) error {
 	r, err := LoadRule(ruleID)
 	if err != nil {
 		return fmt.Errorf("加载规则失败: %w", err)
 	}
 	if r.Status != 1 {
-		// 清理两种协议的 conf 文件（防止协议切换后残留）
-		os.Remove(filepath.Join(config.Global.Nginx.ConfDir, fmt.Sprintf("%d-http.conf", r.ID)))
-		os.Remove(filepath.Join(config.Global.Nginx.ConfDir, fmt.Sprintf("%d-stream.conf", r.ID)))
-		SyncPortDefaults()
-		return Reload()
+		// DeleteRule 会对规则文件、托管 CA 和 catch-all 做同一份失败恢复。
+		return DeleteRule(r.ID)
 	}
 	text, err := RenderRule(r)
 	if err != nil {
@@ -573,27 +700,68 @@ func ApplyRule(ruleID int64) error {
 	default:
 		oldPath = filepath.Join(config.Global.Nginx.ConfDir, fmt.Sprintf("%d-http.conf", r.ID))
 	}
-	os.Remove(oldPath)
+	pathSnap := snapshotFile(path)
+	oldPathSnap := snapshotFile(oldPath)
+	caPath := UpstreamCAPath(r.ID)
+	caSnap := snapshotFile(caPath)
+	defaultSnaps := snapshotDefaultConfs()
+	rollbackFiles := func() {
+		restoreFile(path, pathSnap)
+		if oldPath != path {
+			restoreFile(oldPath, oldPathSnap)
+		}
+		restoreFile(caPath, caSnap)
+		restoreDefaultConfs(defaultSnaps)
+	}
+
+	caPEM := ""
+	if r.UpstreamProtocol == "https" && r.ProxySSLVerify == 1 && r.ProxySSLTrustedCAPEM != "" {
+		caPEM, err = NormalizeTrustedCAPEM(r.ProxySSLTrustedCAPEM)
+		if err != nil {
+			return err
+		}
+	}
+	if err := SyncUpstreamCAFile(r.ID, caPEM); err != nil {
+		return fmt.Errorf("写回源 CA 失败: %w", err)
+	}
+
+	if oldPath != path {
+		if err := os.Remove(oldPath); err != nil && !os.IsNotExist(err) {
+			rollbackFiles()
+			return fmt.Errorf("清理旧协议配置失败: %w", err)
+		}
+	}
 
 	// 原子写入
 	tmp := path + ".tmp"
+	defer os.Remove(tmp)
 	if err := os.WriteFile(tmp, []byte(text), 0644); err != nil {
+		rollbackFiles()
 		return fmt.Errorf("写临时文件失败: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
+		rollbackFiles()
 		return err
 	}
 
 	// 同步端口默认拒绝块
-	SyncPortDefaults()
+	if err := SyncPortDefaults(); err != nil {
+		rollbackFiles()
+		return fmt.Errorf("同步端口默认配置失败: %w", err)
+	}
 
 	// 语法验证
 	if out, err := runNginxCmd("-t"); err != nil {
-		os.Remove(path)
+		rollbackFiles()
 		return fmt.Errorf("nginx 语法错误: %s", out)
 	}
 	// reload
 	if err := smartReload(); err != nil {
+		rollbackFiles()
+		// 尽力让已恢复的旧文件重新成为活动配置；原 reload 若未成功，旧 worker 本就未变。
+		if _, testErr := runNginxCmd("-t"); testErr == nil {
+			_ = smartReload()
+		}
 		return err
 	}
 
@@ -611,31 +779,50 @@ func PreviewRule(ruleID int64) (string, error) {
 }
 
 func DeleteRule(ruleID int64) error {
-	removeRuleFiles(ruleID, "http")
-	removeRuleFiles(ruleID, "tcp")
+	httpPath := filepath.Join(config.Global.Nginx.ConfDir, fmt.Sprintf("%d-http.conf", ruleID))
+	streamPath := filepath.Join(config.Global.Nginx.ConfDir, fmt.Sprintf("%d-stream.conf", ruleID))
+	caPath := UpstreamCAPath(ruleID)
+	httpSnap := snapshotFile(httpPath)
+	streamSnap := snapshotFile(streamPath)
+	caSnap := snapshotFile(caPath)
+	defaultSnaps := snapshotDefaultConfs()
+	rollback := func() {
+		restoreFile(httpPath, httpSnap)
+		restoreFile(streamPath, streamSnap)
+		restoreFile(caPath, caSnap)
+		restoreDefaultConfs(defaultSnaps)
+	}
+	for _, path := range []string{httpPath, streamPath} {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			rollback()
+			return fmt.Errorf("删除规则配置失败: %w", err)
+		}
+	}
+	if err := SyncUpstreamCAFile(ruleID, ""); err != nil {
+		rollback()
+		return fmt.Errorf("删除回源 CA 失败: %w", err)
+	}
+	if err := SyncPortDefaults(); err != nil {
+		rollback()
+		return fmt.Errorf("同步端口默认配置失败: %w", err)
+	}
+	if out, err := runNginxCmd("-t"); err != nil {
+		rollback()
+		return fmt.Errorf("删除规则后 nginx 语法错误，已恢复: %s", out)
+	}
+	if err := smartReload(); err != nil {
+		rollback()
+		if _, testErr := runNginxCmd("-t"); testErr == nil {
+			_ = smartReload()
+		}
+		return err
+	}
 	os.Remove(filepath.Join(config.Global.Nginx.LogrotateDir, fmt.Sprintf("ankerye-flow-%d", ruleID)))
 	logs, _ := filepath.Glob(filepath.Join(config.Global.Nginx.LogDir, fmt.Sprintf("rule_%d_*", ruleID)))
 	for _, l := range logs {
 		os.Remove(l)
 	}
-	SyncPortDefaults()
-	return smartReload()
-}
-
-func removeRuleFiles(ruleID int64, protocol string) error {
-	var suffix string
-	switch protocol {
-	case "http", "https":
-		suffix = "http"
-	case "tcp", "udp", "tcpudp":
-		suffix = "stream"
-	default:
-		// 两种都删
-		os.Remove(filepath.Join(config.Global.Nginx.ConfDir, fmt.Sprintf("%d-http.conf", ruleID)))
-		os.Remove(filepath.Join(config.Global.Nginx.ConfDir, fmt.Sprintf("%d-stream.conf", ruleID)))
-		return nil
-	}
-	return os.Remove(filepath.Join(config.Global.Nginx.ConfDir, fmt.Sprintf("%d-%s.conf", ruleID, suffix)))
+	return nil
 }
 
 func ruleFilePath(ruleID int64, protocol string) string {
@@ -765,11 +952,11 @@ func ExportAll() (map[string]string, string, error) {
 	for _, it := range items {
 		r, err := LoadRule(it.id)
 		if err != nil {
-			continue
+			return nil, "", fmt.Errorf("load rule %d: %w", it.id, err)
 		}
 		text, err := RenderRule(r)
 		if err != nil {
-			continue
+			return nil, "", fmt.Errorf("render rule %d: %w", it.id, err)
 		}
 		var suffix string
 		if it.proto == "http" || it.proto == "https" {

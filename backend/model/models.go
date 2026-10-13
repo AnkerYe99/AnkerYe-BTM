@@ -3,36 +3,42 @@ package model
 import "database/sql"
 
 type Rule struct {
-	ID           int64          `json:"id"`
-	Name         string         `json:"name"`
-	Protocol     string         `json:"protocol"` // http / tcp / udp
-	ListenPort   int            `json:"listen_port"` // HTTP port for http; proxy port for tcp/udp
-	ListenStack  string         `json:"listen_stack"`
-	HTTPSEnabled int            `json:"https_enabled"`
-	HTTPSPort    *int           `json:"https_port"`
-	ServerName   string         `json:"server_name"`
-	LBMethod     string         `json:"lb_method"`
-	SSLCertID    sql.NullInt64  `json:"-"`
-	SSLCertIDVal *int64         `json:"ssl_cert_id"`
-	SSLRedirect  int            `json:"ssl_redirect"`
-	HCEnabled    int            `json:"hc_enabled"`
-	HCInterval   int            `json:"hc_interval"`
-	HCTimeout    int            `json:"hc_timeout"`
-	HCPath       string         `json:"hc_path"`
-	HCHost       string         `json:"hc_host"`
-	HCRise       int            `json:"hc_rise"`
-	HCFall       int            `json:"hc_fall"`
-	LogMaxSize      string         `json:"log_max_size"`
-	CaptureMaxSize  string         `json:"capture_max_size"`
-	CustomConfig    string         `json:"custom_config"`
-	CaptureBody     int            `json:"capture_body"`
-	IPACLMode       string         `json:"ip_acl_mode"` // off / allow / deny
-	IPACLList       string         `json:"ip_acl_list"` // IP/CIDR 名单，一行一条
-	Status       int            `json:"status"`
-	CreatedAt    string         `json:"created_at"`
-	UpdatedAt    string         `json:"updated_at"`
-	Servers      []Server       `json:"servers,omitempty"`
-	Domain       string         `json:"-"` // cert domain for nginx rendering
+	ID                   int64         `json:"id"`
+	Name                 string        `json:"name"`
+	Protocol             string        `json:"protocol"`    // http / tcp / udp
+	ListenPort           int           `json:"listen_port"` // HTTP port for http; proxy port for tcp/udp
+	ListenStack          string        `json:"listen_stack"`
+	HTTPSEnabled         int           `json:"https_enabled"`
+	HTTPSPort            *int          `json:"https_port"`
+	ServerName           string        `json:"server_name"`
+	LBMethod             string        `json:"lb_method"`
+	SSLCertID            sql.NullInt64 `json:"-"`
+	SSLCertIDVal         *int64        `json:"ssl_cert_id"`
+	SSLRedirect          int           `json:"ssl_redirect"`
+	HCEnabled            int           `json:"hc_enabled"`
+	HCInterval           int           `json:"hc_interval"`
+	HCTimeout            int           `json:"hc_timeout"`
+	HCPath               string        `json:"hc_path"`
+	HCHost               string        `json:"hc_host"`
+	HCRise               int           `json:"hc_rise"`
+	HCFall               int           `json:"hc_fall"`
+	LogMaxSize           string        `json:"log_max_size"`
+	CaptureMaxSize       string        `json:"capture_max_size"`
+	CustomConfig         string        `json:"custom_config"`
+	CaptureBody          int           `json:"capture_body"`
+	IPACLMode            string        `json:"ip_acl_mode"` // off / allow / deny
+	IPACLList            string        `json:"ip_acl_list"` // IP/CIDR 名单，一行一条
+	UpstreamProtocol     string        `json:"upstream_protocol"`
+	ProxySSLName         string        `json:"proxy_ssl_name"`
+	ProxySSLVerify       int           `json:"proxy_ssl_verify"`
+	ProxySSLTrustedCAPEM string        `json:"proxy_ssl_trusted_ca_pem"`
+	ProxySSLVerifyDepth  int           `json:"proxy_ssl_verify_depth"`
+	ProxyReadTimeout     int           `json:"proxy_read_timeout"`
+	Status               int           `json:"status"`
+	CreatedAt            string        `json:"created_at"`
+	UpdatedAt            string        `json:"updated_at"`
+	Servers              []Server      `json:"servers,omitempty"`
+	Domain               string        `json:"-"` // cert domain for nginx rendering
 }
 
 type Server struct {

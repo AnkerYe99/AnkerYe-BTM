@@ -36,6 +36,16 @@
           </el-table-column>
           <el-table-column v-if="!isMobile" prop="server_name" label="域名" min-width="140" show-overflow-tooltip />
           <el-table-column v-if="!isMobile" prop="addresses" label="后端地址" min-width="160" show-overflow-tooltip />
+          <el-table-column v-if="!isMobile" label="回源" min-width="92">
+            <template #default="{row}">
+              <el-tag :type="row.upstream_protocol==='https' ? 'success' : 'info'" size="small">
+                {{ (row.upstream_protocol || 'http').toUpperCase() }}
+              </el-tag>
+              <span v-if="row.proxy_read_timeout && row.proxy_read_timeout!==60" style="margin-left:4px;color:#999;font-size:12px">
+                {{ row.proxy_read_timeout }}s
+              </span>
+            </template>
+          </el-table-column>
           <el-table-column v-if="!isMobile" label="均衡算法" min-width="92">
             <template #default="{row}">
               {{ lbLabel(row.lb_method) }}

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -68,7 +69,7 @@ func Init(path string) error {
 // versionedMigrations 是有序的增量迁移列表。
 // 规则：
 //   - version 从 1 开始严格递增，不可删除或修改已有记录
-//   - sql 中每条语句独立执行，ALTER TABLE 失败会被忽略（字段已存在）
+//   - 每个版本在事务中执行；只有“同名字段已存在”可以兼容跳过
 //   - 新增表结构变更在此追加，不要修改已有条目
 var versionedMigrations = []struct {
 	version int
@@ -321,6 +322,59 @@ var versionedMigrations = []struct {
 		// IP/CIDR 名单，一行一条（也兼容逗号分隔），写入前后端均严格校验格式
 		`ALTER TABLE rules ADD COLUMN ip_acl_list TEXT DEFAULT ''`,
 	}},
+	{10, "add_https_upstream", []string{
+		`ALTER TABLE rules ADD COLUMN upstream_protocol TEXT NOT NULL DEFAULT 'http'
+			CHECK(upstream_protocol IN ('http','https'))`,
+		`ALTER TABLE rules ADD COLUMN proxy_ssl_name TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE rules ADD COLUMN proxy_ssl_verify INTEGER NOT NULL DEFAULT 1
+			CHECK(proxy_ssl_verify IN (0,1))`,
+		`ALTER TABLE rules ADD COLUMN proxy_ssl_trusted_ca_pem TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE rules ADD COLUMN proxy_ssl_verify_depth INTEGER NOT NULL DEFAULT 5
+			CHECK(proxy_ssl_verify_depth BETWEEN 1 AND 10)`,
+		`ALTER TABLE rules ADD COLUMN proxy_read_timeout INTEGER NOT NULL DEFAULT 60
+			CHECK(proxy_read_timeout BETWEEN 1 AND 86400)`,
+	}},
+}
+
+func latestMigrationVersion() int {
+	return versionedMigrations[len(versionedMigrations)-1].version
+}
+
+func isDuplicateColumnError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "duplicate column name")
+}
+
+func assertHTTPSUpstreamColumns() error {
+	want := map[string]bool{
+		"upstream_protocol": false, "proxy_ssl_name": false, "proxy_ssl_verify": false,
+		"proxy_ssl_trusted_ca_pem": false, "proxy_ssl_verify_depth": false,
+		"proxy_read_timeout": false,
+	}
+	rows, err := DB.Query(`PRAGMA table_info(rules)`)
+	if err != nil {
+		return fmt.Errorf("inspect rules schema: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, typ string
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if _, ok := want[name]; ok {
+			want[name] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inspect rules schema rows: %w", err)
+	}
+	for name, found := range want {
+		if !found {
+			return fmt.Errorf("迁移 v10 不完整: rules.%s 不存在", name)
+		}
+	}
+	return nil
 }
 
 func migrate() error {
@@ -335,21 +389,34 @@ func migrate() error {
 
 	// 查询当前已应用的最高版本
 	var current int
-	DB.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM _schema_version`).Scan(&current)
+	if err := DB.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM _schema_version`).Scan(&current); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	if current > latestMigrationVersion() {
+		return fmt.Errorf("数据库迁移版本 %d 高于本程序支持的最大版本 %d", current, latestMigrationVersion())
+	}
 
 	// 若版本表为空但 rules 表已存在，说明是从旧版本升级上来的数据库，
 	// 把所有现有迁移标记为已完成，不重复执行 DDL。
 	if current == 0 {
 		var tableCount int
-		DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='rules'`).Scan(&tableCount)
+		if err := DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='rules'`).Scan(&tableCount); err != nil {
+			return fmt.Errorf("inspect legacy schema: %w", err)
+		}
 		if tableCount > 0 {
 			now := "legacy"
 			for _, m := range versionedMigrations {
-				DB.Exec(`INSERT OR IGNORE INTO _schema_version(version,name,applied_at) VALUES(?,?,?)`,
-					m.version, m.name, now)
+				// 历史逻辑只能证明旧字段已经存在；v10 必须真正执行并在末尾验列。
+				if m.version >= 10 {
+					continue
+				}
+				if _, err := DB.Exec(`INSERT OR IGNORE INTO _schema_version(version,name,applied_at) VALUES(?,?,?)`,
+					m.version, m.name, now); err != nil {
+					return fmt.Errorf("mark legacy migration v%d: %w", m.version, err)
+				}
 			}
-			log.Printf("[db] 检测到旧版数据库，已标记 %d 个迁移为已完成", len(versionedMigrations))
-			current = versionedMigrations[len(versionedMigrations)-1].version
+			log.Printf("[db] 检测到旧版数据库，已标记 v1-v9 迁移为已完成")
+			current = 9
 		}
 	}
 
@@ -359,22 +426,47 @@ func migrate() error {
 			continue
 		}
 		log.Printf("[db] 应用迁移 v%d: %s", m.version, m.name)
+		tx, err := DB.Begin()
+		if err != nil {
+			return fmt.Errorf("迁移 v%d 开始事务失败: %w", m.version, err)
+		}
 		for _, stmt := range m.sql {
-			if _, err := DB.Exec(stmt); err != nil {
-				// ALTER TABLE 字段已存在时静默跳过
-				if len(stmt) > 11 && stmt[:11] == "ALTER TABLE" {
+			if _, err := tx.Exec(stmt); err != nil {
+				// 只兼容历史上已经手工加过同名字段的节点；其他 ALTER 错误必须失败。
+				if strings.HasPrefix(strings.TrimSpace(stmt), "ALTER TABLE") && isDuplicateColumnError(err) {
 					continue
 				}
+				// SQLite 不允许 ADD COLUMN 使用 datetime() 非常量默认值；v4 的两条历史 SQL
+				// 过去被宽泛错误吞掉。仅对这两个精确语句降级为 NULL 默认并补齐现有行。
+				if m.version == 4 && strings.Contains(strings.ToLower(err.Error()), "non-constant default") &&
+					strings.Contains(stmt, " ADD COLUMN updated_at DATETIME DEFAULT (datetime('now','localtime'))") {
+					fallback := strings.Replace(stmt, " DEFAULT (datetime('now','localtime'))", " DEFAULT NULL", 1)
+					if _, fallbackErr := tx.Exec(fallback); fallbackErr == nil {
+						parts := strings.Fields(stmt)
+						if len(parts) >= 3 {
+							_, _ = tx.Exec("UPDATE " + parts[2] + " SET updated_at=datetime('now','localtime') WHERE updated_at IS NULL")
+						}
+						continue
+					}
+				}
+				tx.Rollback()
 				return fmt.Errorf("迁移 v%d (%s) 执行失败: %w", m.version, m.name, err)
 			}
 		}
-		if _, err := DB.Exec(
+		if _, err := tx.Exec(
 			`INSERT INTO _schema_version(version,name,applied_at) VALUES(?,?,datetime('now','localtime'))`,
 			m.version, m.name,
 		); err != nil {
+			tx.Rollback()
 			return fmt.Errorf("记录迁移版本失败: %w", err)
 		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("提交迁移 v%d 失败: %w", m.version, err)
+		}
 		log.Printf("[db] 迁移 v%d 完成", m.version)
+	}
+	if err := assertHTTPSUpstreamColumns(); err != nil {
+		return err
 	}
 
 	// 默认系统设置（INSERT OR IGNORE 保证不覆盖用户已有配置）

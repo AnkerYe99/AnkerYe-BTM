@@ -4,6 +4,7 @@ import (
 	"crypto/md5"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -67,33 +68,39 @@ func upsertSyncNode(addr, version, syncType string) {
 //     S:{address}|{port}|{weight}|{state}
 
 type ruleForExport struct {
-	ID             int64
-	Name           string
-	Protocol       string
-	ListenPort     int64
-	ListenStack    string
-	HttpsEnabled   int64
-	HttpsPort      int64
-	ServerName     string
-	LbMethod       string
-	SslCertID      int64
-	SslCertDomain  string
-	SslRedirect    int64
-	HcEnabled      int64
-	HcInterval     int64
-	HcTimeout      int64
-	HcPath         string
-	HcHost         string
-	HcFall         int64
-	HcRise         int64
-	LogMaxSize     string
-	CaptureMaxSize string
-	CustomConfig   string
-	CaptureBody    int64
-	IPACLMode      string
-	IPACLList      string
-	Status         int64
-	Servers        []serverForExport
+	ID                   int64
+	Name                 string
+	Protocol             string
+	ListenPort           int64
+	ListenStack          string
+	HttpsEnabled         int64
+	HttpsPort            int64
+	ServerName           string
+	LbMethod             string
+	SslCertID            int64
+	SslCertDomain        string
+	SslRedirect          int64
+	HcEnabled            int64
+	HcInterval           int64
+	HcTimeout            int64
+	HcPath               string
+	HcHost               string
+	HcFall               int64
+	HcRise               int64
+	LogMaxSize           string
+	CaptureMaxSize       string
+	CustomConfig         string
+	CaptureBody          int64
+	IPACLMode            string
+	IPACLList            string
+	UpstreamProtocol     string
+	ProxySSLName         string
+	ProxySSLVerify       int64
+	ProxySSLTrustedCAPEM string
+	ProxySSLVerifyDepth  int64
+	ProxyReadTimeout     int64
+	Status               int64
+	Servers              []serverForExport
 }
 
 type serverForExport struct {
@@ -110,7 +117,9 @@ func queryRulesForExport() []ruleForExport {
 		IFNULL(ssl_cert_id,0),ssl_redirect,hc_enabled,hc_interval,hc_timeout,
 		IFNULL(hc_path,'/'),IFNULL(hc_host,''),hc_fall,hc_rise,IFNULL(log_max_size,'5M'),
 		IFNULL(capture_max_size,'5M'),IFNULL(custom_config,''),IFNULL(capture_body,0),
-		IFNULL(ip_acl_mode,'off'),IFNULL(ip_acl_list,''),status
+			IFNULL(ip_acl_mode,'off'),IFNULL(ip_acl_list,''),IFNULL(upstream_protocol,'http'),
+			IFNULL(proxy_ssl_name,''),IFNULL(proxy_ssl_verify,1),IFNULL(proxy_ssl_trusted_ca_pem,''),
+			IFNULL(proxy_ssl_verify_depth,5),IFNULL(proxy_read_timeout,60),status
 		FROM rules ORDER BY id ASC`)
 	if rrows == nil {
 		return rules
@@ -122,7 +131,9 @@ func queryRulesForExport() []ruleForExport {
 			&r.HttpsEnabled, &r.HttpsPort, &r.ServerName, &r.LbMethod,
 			&r.SslCertID, &r.SslRedirect, &r.HcEnabled, &r.HcInterval, &r.HcTimeout,
 			&r.HcPath, &r.HcHost, &r.HcFall, &r.HcRise, &r.LogMaxSize, &r.CaptureMaxSize,
-			&r.CustomConfig, &r.CaptureBody, &r.IPACLMode, &r.IPACLList, &r.Status)
+			&r.CustomConfig, &r.CaptureBody, &r.IPACLMode, &r.IPACLList,
+			&r.UpstreamProtocol, &r.ProxySSLName, &r.ProxySSLVerify, &r.ProxySSLTrustedCAPEM,
+			&r.ProxySSLVerifyDepth, &r.ProxyReadTimeout, &r.Status)
 		rules = append(rules, r)
 	}
 	for i := range rules {
@@ -159,6 +170,9 @@ func hashRules(rules []ruleForExport) string {
 			LogMaxSize: r.LogMaxSize, CaptureMaxSize: r.CaptureMaxSize,
 			CustomConfig: r.CustomConfig, CaptureBody: r.CaptureBody,
 			IPACLMode: r.IPACLMode, IPACLList: r.IPACLList, Status: r.Status,
+			UpstreamProtocol: r.UpstreamProtocol, ProxySSLName: r.ProxySSLName,
+			ProxySSLVerify: r.ProxySSLVerify, ProxySSLTrustedCAPEM: r.ProxySSLTrustedCAPEM,
+			ProxySSLVerifyDepth: r.ProxySSLVerifyDepth, ProxyReadTimeout: r.ProxyReadTimeout,
 		})
 		for _, s := range r.Servers {
 			engine.WriteServerFP(h, engine.ServerFP{
@@ -167,6 +181,48 @@ func hashRules(rules []ruleForExport) string {
 		}
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+const httpsUpstreamCapability = "https_upstream_v1"
+
+func hasCapability(raw, want string) bool {
+	for _, item := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ' ' || r == ';' }) {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
+func rulesNeedHTTPSUpstreamV1(rules []ruleForExport) bool {
+	for _, r := range rules {
+		if r.UpstreamProtocol != "http" || r.ProxySSLName != "" || r.ProxySSLVerify != 1 ||
+			r.ProxySSLTrustedCAPEM != "" || r.ProxySSLVerifyDepth != 5 || r.ProxyReadTimeout != 60 {
+			return true
+		}
+	}
+	return false
+}
+
+func enforceRuleSyncCapability(c *gin.Context, rules []ruleForExport) bool {
+	if !rulesNeedHTTPSUpstreamV1(rules) || hasCapability(c.Query("caps"), httpsUpstreamCapability) {
+		return true
+	}
+	addr := c.ClientIP()
+	now := time.Now().Format("2006-01-02 15:04:05")
+	if db.DB != nil {
+		_, _ = db.DB.Exec(`INSERT INTO sync_nodes(name,address,last_sync_at,status,last_err)
+			VALUES(?,?,?,?,?) ON CONFLICT(address) DO UPDATE SET
+			last_sync_at=excluded.last_sync_at,status='error',last_err='upgrade_required'`,
+			addr, addr, now, "error", "upgrade_required")
+	}
+	c.JSON(409, gin.H{
+		"code": 1, "error": "upgrade_required",
+		"msg":  "主节点存在 HTTPS 回源或非默认读取超时规则，从节点需先升级 https_upstream_v1",
+		"data": nil,
+	})
+	c.Abort()
+	return false
 }
 
 // 证书规范格式：按 domain ASC 排序，每条：C:{domain}|{cert_pem}
@@ -273,13 +329,16 @@ func SyncExport(c *gin.Context) {
 		return
 	}
 
+	rules := queryRulesForExport()
+	if !enforceRuleSyncCapability(c, rules) {
+		return
+	}
 	configs, version, err := engine.ExportAll()
 	if err != nil {
 		util.Fail(c, 500, err.Error())
 		return
 	}
 
-	rules := queryRulesForExport()
 	rulesJSON := make([]gin.H, 0, len(rules))
 	for _, r := range rules {
 		servers := make([]gin.H, 0, len(r.Servers))
@@ -297,7 +356,12 @@ func SyncExport(c *gin.Context) {
 			"log_max_size": r.LogMaxSize, "capture_max_size": r.CaptureMaxSize,
 			"custom_config": r.CustomConfig, "capture_body": r.CaptureBody,
 			"ip_acl_mode": r.IPACLMode, "ip_acl_list": r.IPACLList, "status": r.Status,
-			"servers": servers,
+			"upstream_protocol": r.UpstreamProtocol, "proxy_ssl_name": r.ProxySSLName,
+			"proxy_ssl_verify":         r.ProxySSLVerify,
+			"proxy_ssl_trusted_ca_pem": r.ProxySSLTrustedCAPEM,
+			"proxy_ssl_verify_depth":   r.ProxySSLVerifyDepth,
+			"proxy_read_timeout":       r.ProxyReadTimeout,
+			"servers":                  servers,
 		})
 	}
 
@@ -339,6 +403,9 @@ func SyncRulesExport(c *gin.Context) {
 	fromAddr := c.ClientIP()
 
 	rules := queryRulesForExport()
+	if !enforceRuleSyncCapability(c, rules) {
+		return
+	}
 	masterMD5 := hashRules(rules)
 
 	if slaveMD5 != "" && slaveMD5 == masterMD5 {
@@ -347,7 +414,11 @@ func SyncRulesExport(c *gin.Context) {
 		return
 	}
 
-	configs, version, _ := engine.ExportAll()
+	configs, version, err := engine.ExportAll()
+	if err != nil {
+		util.Fail(c, 500, err.Error())
+		return
+	}
 
 	bl, wl := queryFilterForExport()
 
@@ -368,7 +439,12 @@ func SyncRulesExport(c *gin.Context) {
 			"log_max_size": r.LogMaxSize, "capture_max_size": r.CaptureMaxSize,
 			"custom_config": r.CustomConfig, "capture_body": r.CaptureBody,
 			"ip_acl_mode": r.IPACLMode, "ip_acl_list": r.IPACLList, "status": r.Status,
-			"servers": servers,
+			"upstream_protocol": r.UpstreamProtocol, "proxy_ssl_name": r.ProxySSLName,
+			"proxy_ssl_verify":         r.ProxySSLVerify,
+			"proxy_ssl_trusted_ca_pem": r.ProxySSLTrustedCAPEM,
+			"proxy_ssl_verify_depth":   r.ProxySSLVerifyDepth,
+			"proxy_read_timeout":       r.ProxyReadTimeout,
+			"servers":                  servers,
 		})
 	}
 
@@ -529,7 +605,7 @@ func ListSyncNodes(c *gin.Context) {
 			"last_rules_sync_at":  lastRules,
 			"last_certs_sync_at":  lastCerts,
 			"last_filter_sync_at": lastFilter,
-			"status": status, "last_err": lastErr, "created_at": createdAt,
+			"status":              status, "last_err": lastErr, "created_at": createdAt,
 		})
 	}
 	util.OK(c, list)
